@@ -7,7 +7,8 @@ val idlClientModules = setOf(
   "helidon",
   "jdk",
   "jetty",
-  "netty"
+  "netty",
+  "sava"
 )
 
 dependencies {
