@@ -66,7 +66,7 @@ final class SvmExactVerifierTest {
                                       final PublicKey authority,
                                       final long amount) {
     return TokenProgram.transferChecked(
-        ACCOUNTS.invokedTokenProgram(), source, mint, destination, authority, amount, DECIMALS);
+        ACCOUNTS.invokedTokenProgram(), source, mint, destination, authority, true, amount, DECIMALS);
   }
 
   private static Instruction memo(final String value) {
@@ -531,7 +531,7 @@ final class SvmExactVerifierTest {
         ACCOUNTS.associatedTokenAccountProgram(), PAY_TO, ACCOUNTS.token2022Program(), MINT).publicKey();
     final var ixs = validInstructions();
     ixs.set(2, TokenProgram.transferChecked(
-        ACCOUNTS.invokedToken2022Program(), SOURCE_ATA, MINT, dest2022, AUTHORITY, AMOUNT, DECIMALS));
+        ACCOUNTS.invokedToken2022Program(), SOURCE_ATA, MINT, dest2022, AUTHORITY, true, AMOUNT, DECIMALS));
     final var resp = VERIFIER.verify(requirements(null), serialize(ixs));
     assertTrue(resp.isValid(), () -> "got: " + resp.invalidReason());
     assertEquals(AUTHORITY, resp.payer());

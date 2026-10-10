@@ -60,7 +60,7 @@ final class SvmExactSettlerTest {
 
   private static Instruction transfer() {
     return TokenProgram.transferChecked(
-        ACCOUNTS.invokedTokenProgram(), SOURCE_ATA, MINT, destinationAta(), AUTHORITY, AMOUNT, DECIMALS);
+        ACCOUNTS.invokedTokenProgram(), SOURCE_ATA, MINT, destinationAta(), AUTHORITY, true, AMOUNT, DECIMALS);
   }
 
   private PaymentRequirements requirements(final PublicKey requirementsFeePayer) {

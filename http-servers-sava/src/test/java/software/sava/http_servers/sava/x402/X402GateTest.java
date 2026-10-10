@@ -55,7 +55,7 @@ final class X402GateTest {
 
   private static Instruction transfer() {
     return TokenProgram.transferChecked(
-        ACCOUNTS.invokedTokenProgram(), SOURCE_ATA, MINT, destinationAta(), AUTHORITY, AMOUNT, DECIMALS);
+        ACCOUNTS.invokedTokenProgram(), SOURCE_ATA, MINT, destinationAta(), AUTHORITY, true, AMOUNT, DECIMALS);
   }
 
   private static PaymentRequirements requirements() {
@@ -129,7 +129,7 @@ final class X402GateTest {
     ixs.add(computeLimit(200_000));
     ixs.add(computePrice(1_000));
     ixs.add(TokenProgram.transferChecked(
-        ACCOUNTS.invokedTokenProgram(), SOURCE_ATA, MINT, destinationAta(), AUTHORITY, AMOUNT + 1, DECIMALS));
+        ACCOUNTS.invokedTokenProgram(), SOURCE_ATA, MINT, destinationAta(), AUTHORITY, true, AMOUNT + 1, DECIMALS));
     final byte[] txBytes = Transaction.createTx(FEE_PAYER, ixs).serialized();
     final var json = "{\"x402Version\":2,\"payload\":{\"transaction\":\""
         + Base64.getEncoder().encodeToString(txBytes) + "\"}}";
