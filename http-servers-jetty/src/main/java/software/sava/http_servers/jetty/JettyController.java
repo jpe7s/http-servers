@@ -97,8 +97,20 @@ final class JettyController extends Handler.Sequence {
       }
     } catch (final Throwable throwable) {
       logger.log(ERROR, "Failed to process request.", throwable);
+      // answered here with the JSON the Helidon and Netty controllers send, not by failing the
+      // callback into Jetty's error page. Consuming what has arrived first marks a connection
+      // with body still to come as not persistent, so the head says Connection: close, as Jetty's
+      // own error response did. reset() drops whatever was set before the throw, the CORS echo
+      // included; on a committed response it throws, and Jetty aborts the exchange
+      request.consumeAvailable();
+      response.reset();
       response.setStatus(500);
-      callback.failed(throwable);
+      responseHeaders.put(JSON_CONTENT);
+      Content.Sink.write(response, true, """
+          {
+            "msg": "Failed to process request."
+          }""", callback
+      );
       return true;
     }
   }

@@ -10,7 +10,7 @@ The 2026-07-24 canonical-routing contract added the compliance-backstop
 family below (the only `NO_COVERAGE` rows in the suite).
 
 Covering tests are real socket round trips (`JettyConformanceTest`,
-`JettyPostHandlerTest`). The suite carries 6 `TIMED_OUT` mutants
+`JettyPostHandlerTest`). The suite carries `TIMED_OUT` mutants
 (socket-wait conversions, audited in `dispatch-timeouts.csv` — causes at the
 end of this file), and the handled-flag family below **flaps between
 `SURVIVED` and detected across runs** — the baseline holds the union of
@@ -95,8 +95,16 @@ executor 2026-07-22).
   with a null origin makes `put(ACCESS_CONTROL_ALLOW_ORIGIN, null)` — a
   header *remove*, i.e. a no-op. The divergent sub-case (a pre-flight
   without an Origin header) has no well-defined semantics to pin.
-- `# error funnel` — `JettyController` 86 (`setStatus(500)` removal in the catch):
-  `callback.failed(throwable)` on the next line produces the same 500.
+- `# error funnel` — no longer holds. The catch in `JettyController.handle`
+  used to fail the callback, which made its `setStatus(500)` redundant; since
+  2026-10-10 it writes the controller's own JSON 500, and removing that
+  `setStatus(500)` answers 200 and is killed (fresh history-free run,
+  2026-10-10). The row matches nothing, but prune and update keep it while
+  its key carries audited `TIMED_OUT` copies (the same-key timeout budget).
+  A surviving `VoidMethodCallMutator` in `handle` would therefore still pass,
+  flagged only by the line-drift advisory against this row's stale `# line`
+  tag: at this key that advisory means a new survivor, not a moved line, and
+  Retag would erase it.
 - **`# compliance backstop`** family (4 rows): the shared `HandlerMap`
   refuses ambiguous paths (encoded separators, encoded dot segments,
   double-encoding, empty segments — see core's `PathCanonicalizer`), but
@@ -140,22 +148,21 @@ audited keys.
 
 ## Audited timeouts (`dispatch-timeouts.csv`)
 
-Three of the four members are one structural cause: a removed call that leaves
+Four of the five members are one structural cause: a removed call that leaves
 the Jetty `Callback` never completed, so the response is never flushed and the
-socket client waits until PIT's watchdog ends the run. The fourth
-(`initRestServer` 34) is a bind-path cause argued separately below. Detection
-here is the clock, not an assertion — weaken these tests and the timeouts
-still read as "detected", which is why membership is audited rather than
-counted. The seven rows collapse to four line-less members, all recorded
-`cause:liveness` — but see the standing 21.5.25 exception on `initRestServer`
-34 below. Membership and cause are key-level, so the `cause:liveness` token
-claims every sibling under each key; none of the four is a mixed key, which
-would need two siblings *timing out* for different structural reasons rather
-than merely a killed sibling sharing a key. A proven mixture would be repaired
-by splitting the identity into distinct method keys, never by annotating a
-line. The line values below are
-diagnostic pointers only — moving the write paths never warns, fails, or
-requires re-anchoring.
+socket client waits until PIT's watchdog ends the run. The fifth (the host
+guard in `initRestServer`) is a bind-path cause argued separately below.
+Detection here is the clock, not an assertion — weaken these tests and the
+timeouts still read as "detected", which is why membership is audited rather
+than counted. The eight rows collapse to five line-less members, all recorded
+`cause:liveness` — but see the standing 21.5.25 exception on the
+`initRestServer` host guard below. Membership and cause are key-level, so the
+`cause:liveness` token claims every sibling under each key; none of the five is
+a mixed key, which would need two siblings *timing out* for different
+structural reasons rather than merely a killed sibling sharing a key. A proven
+mixture would be repaired by splitting the identity into distinct method keys,
+never by annotating a line. The line values below are diagnostic pointers only
+— moving the write paths never warns, fails, or requires re-anchoring.
 
 **Fixture bound (recorded per the 21.5.25 rule).** `JettyConformanceTest`'s
 requests carry `HttpRequest.timeout(Duration.ofSeconds(10))`. It is not the
@@ -166,14 +173,17 @@ either way; it is recorded so it need not be rediscovered. Note that
 `startOnAnOccupiedPortThrows`, the covering test for `initRestServer` 34, uses
 no HTTP client at all and therefore has no fixture bound whatsoever.
 
-- `JettyController.handle` 66, 75, 92, 101 (`VoidMethodCallMutator`) — 66 and
-  75 drop the `Content.Sink.write` that emits the 404 and 405 JSON bodies
-  (the write completes the callback; without it the status is set and nothing
-  is ever sent), 92 drops the `callback.succeeded()` that terminates a
-  pre-flight answer, and 101 the `callback.failed(throwable)` that terminates
-  the 500 path. The sibling write at 58 (the ambiguous-path 400) is *not*
-  here: it is `NO_COVERAGE`, socket-unreachable behind Jetty's
-  `UriCompliance` — see the `# compliance backstop` family above.
+- `JettyController.handle` (`VoidMethodCallMutator`) — removing the
+  `Content.Sink.write` that emits the 404, 405 or 500 JSON body (the write
+  completes the callback; without it the status is set and nothing is ever
+  sent), or the `callback.succeeded()` that terminates a pre-flight answer.
+  The ambiguous-path 400's write is *not* here: it is `NO_COVERAGE`,
+  socket-unreachable behind Jetty's `UriCompliance` — see the
+  `# compliance backstop` family above.
+- `JettyErrorHandler.generateResponse` (`VoidMethodCallMutator`) — removing
+  the `super` call: the page for an error Jetty answers itself is never
+  written and its callback never completes. Covered by
+  `jettyErrorPageCarriesNoFailureDetail`, whose refused write is that error.
 - `JettyQueryHandler.handle` 42 (`VoidMethodCallMutator`) — `response.write`
   removed: status and headers are set, the body never leaves, the callback
   never completes.

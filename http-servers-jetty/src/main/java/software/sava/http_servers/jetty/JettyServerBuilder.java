@@ -100,5 +100,6 @@ public class JettyServerBuilder extends BaseHttpServerBuilder<Handler, Server> {
     final var controller = new JettyController(handlerMap);
     final var compressionHandler = new CompressionHandler(controller);
     server.setHandler(compressionHandler);
+    server.setErrorHandler(new JettyErrorHandler());
   }
 }

@@ -2,8 +2,10 @@
 # bullet): line-less class,method,mutator keys, one per member. A timed-out mutant
 # outside this set is a reviewer-stop — the ratchet cannot see a weakened covering
 # assertion behind a timeout. Structural causes, and the lines they argue about, are
-# in README.md. Measured under `qualityGate` 2026-07-28.
-software.sava.http_servers.jetty.JettyController,                handle, VoidMethodCallMutator # cause:liveness # lines 66, 75, 92, 101
+# in README.md. Measured under `qualityGate` 2026-07-28; the JettyErrorHandler member
+# was added from a solo history-free `pitestDispatch`, 2026-10-10.
+software.sava.http_servers.jetty.JettyController,                handle, VoidMethodCallMutator # cause:liveness # lines 66, 75, 92, 109
+software.sava.http_servers.jetty.JettyErrorHandler,              generateResponse, VoidMethodCallMutator # cause:liveness # line 24
 software.sava.http_servers.jetty.JettyQueryHandler,              handle, VoidMethodCallMutator # cause:liveness # line 42
 software.sava.http_servers.jetty.JettyCachedJsonResponseHandler, handle, VoidMethodCallMutator # cause:liveness # line 26
 software.sava.http_servers.jetty.JettyServerBuilder,             initRestServer, RemoveConditionalMutator_EQUAL_ELSE # cause:liveness # line 34

@@ -123,7 +123,13 @@ HttpResponse.json(402, "{\"error\":\"payment required\"}")
     .withHeader("X-Payment-Response", settlement);
 ```
 
-A handler that throws is answered with `500`, and the failure is logged.
+A handler that throws a `RuntimeException` is answered with `500` and the failure is logged;
+nothing of the failure reaches the caller. The Jetty, Helidon and Netty backends send
+`{"msg": "Failed to process request."}` as JSON, and the JDK backend sends no body. An `Error`
+gets the same `500` only on Jetty and on Netty's non-blocking routes: Helidon answers it with its
+own `text/plain` `500`, and the JDK backend and Netty's blocking routes do not answer it at all.
+The page Jetty writes for an error it answers itself, such as a response whose `Content-Length`
+does not match its body, shows the status reason where the default page showed the failure.
 
 #### Backend divergences
 
@@ -163,7 +169,7 @@ only when a client stalls: the head waits until the declared body has arrived, f
 client takes to send it — a slow or merely large upload to an unrouted path delays its `404` by
 its own transfer time — up to `jdk.httpserver`'s drain amount (`sun.net.httpserver.drainAmount`,
 64 KiB by default), past which the head is written and the connection closed after it, as before.
-A handler that throws is still answered `500` and logged at `ERROR`.
+A handler that throws a `RuntimeException` is still answered `500` and logged at `ERROR`.
 
 **HTTP/1.0.** The JDK, Jetty and Netty backends answer an `HTTP/1.0` request and close the
 connection afterwards unless it asks for

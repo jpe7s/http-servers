@@ -90,6 +90,76 @@ final class JettyConformanceTest {
     }
   }
 
+  /// A throwing handler's 500 is the controller's own answer: the JSON error shape the Helidon
+  /// and Netty controllers send, with nothing of the throwable in it. Jetty's default error page
+  /// would print the throwable's class and message to the caller. The CORS echo set before the
+  /// handler ran is dropped, as Jetty's own error response drops it.
+  @Test
+  void handlerFailureAnswersJsonWithoutTheThrowable() throws Exception {
+    final int port = serve(builder ->
+        builder.blockingQueryHandler("/boom", request -> {
+          throw new IllegalStateException("secret-detail");
+        }));
+
+    try (final var client = HttpClient.newHttpClient()) {
+      final var response = client.send(
+          HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/boom"))
+              .timeout(Duration.ofSeconds(10))
+              .header("Origin", "https://example.test")
+              .GET()
+              .build(),
+          BodyHandlers.ofString()
+      );
+      assertEquals(500, response.statusCode());
+      assertEquals("""
+          {
+            "msg": "Failed to process request."
+          }""", response.body());
+      assertEquals("application/json", response.headers().firstValue("Content-Type").orElse(null));
+      org.junit.jupiter.api.Assertions.assertTrue(
+          response.headers().firstValue("Access-Control-Allow-Origin").isEmpty(),
+          "the 500 must not carry the CORS echo set before the handler threw");
+    }
+  }
+
+  /// The page Jetty writes for an error it answers itself names the status reason, not the
+  /// failure. A response declaring a shorter `Content-Length` than its body is refused by
+  /// Jetty's write before the head is committed, and the default page would print the
+  /// refusal's `IOException` — class and message — to the caller.
+  @Test
+  void jettyErrorPageCarriesNoFailureDetail() throws Exception {
+    final int port = serve(builder ->
+        builder.blockingQueryHandler("/short", request ->
+            HttpResponse.json("{}").withHeader("Content-Length", "1")));
+
+    try (final var client = HttpClient.newHttpClient()) {
+      final var response = get(client, port, "/short");
+      assertEquals(500, response.statusCode());
+      final var body = response.body();
+      org.junit.jupiter.api.Assertions.assertFalse(body.contains("IOException") || body.contains("content-length"), body);
+      org.junit.jupiter.api.Assertions.assertTrue(body.contains("Server Error"), body);
+    }
+  }
+
+  /// A 500 answered while the request body is still arriving says `Connection: close`, as
+  /// Jetty's own error response did: consuming what has arrived before the head is written
+  /// marks a connection with body still to come as not persistent. Written first, the head goes
+  /// out without it and Jetty closes the connection unannounced, so a keep-alive client reuses a
+  /// dead connection.
+  @Test
+  void handlerFailureMidUploadAnnouncesTheClose() throws Exception {
+    final int port = serve(builder ->
+        builder.blockingQueryPost("/boom", request -> {
+          throw new IllegalStateException("handler bug");
+        }));
+
+    final var exchange = rawExchange(port, "POST /boom HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+        + "Content-Type: application/octet-stream\r\nContent-Length: 2000000\r\n\r\n"
+        + "x".repeat(1000));
+    assertEquals(500, rawStatus(exchange.response()), exchange.response());
+    assertEquals("close", rawHeader(exchange.response(), "Connection"), exchange.response());
+  }
+
   @Test
   void statusAndCustomHeadersCrossTheWire() throws Exception {
     final int port = serve(builder ->
