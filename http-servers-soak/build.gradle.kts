@@ -13,7 +13,7 @@ dependencies {
 // soak.sh launches `java` directly (the java-module plugin adds no run task): this writes the
 // module's runtime module path to build/soak/module-path.txt and the toolchain launcher the
 // module was compiled for to build/soak/java.txt.
-val soakModulePath by tasks.registering {
+val soakModulePath = tasks.register("soakModulePath") {
   group = "build"
   description = "Writes the runtime module path and the toolchain java launcher under build/soak for soak.sh."
   val runtimeClasspath = sourceSets.main.get().runtimeClasspath
