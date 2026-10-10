@@ -83,7 +83,9 @@ edges the ratchet cannot see.
   semantics are unchanged; captured PIT-input changes do, and an unmodeled
   semantic change requires a timeout-quiet format bump. This adoption changes
   PIT and ArcMutate Base, so its fresh certification is the new evidence
-  boundary; do not infer a reset from a future version-number-only bump.
+  boundary; a version-number-only bump resets the counters as well, since the
+  pin lives in `settings.gradle.kts`, one of every suite's recorded source
+  inputs.
 - **No mixed timeout keys — and the bar for one is higher than it looks.**
   21.5.25 says a key that mixes liveness and finite causes cannot be an honest
   certifying row. That applies only when two or more siblings *actually time

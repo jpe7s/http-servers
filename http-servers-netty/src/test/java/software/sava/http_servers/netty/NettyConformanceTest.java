@@ -38,9 +38,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 ///
 /// Every server started through `serve`/`start` (or `absentHostBindsAllInterfaces`'s direct
 /// starts) is registered and stopped in an `@AfterEach`, so no connection or event-loop
-/// thread leaks between tests — the isolation AGENTS.md asks for so state cannot leak between
-/// PIT mutants. Tests that own a server's lifecycle explicitly (`startOwned`,
-/// `startOnAnOccupiedPortThrows`) close it themselves.
+/// thread leaks between tests — the teardown sava-build's HARDENING.md asks for so state
+/// cannot leak between PIT mutants ("When a mutant won't die"). Tests that own a server's
+/// lifecycle explicitly (`startOwned`, `startOnAnOccupiedPortThrows`) close it themselves.
 ///
 /// Every client request and raw socket carries a 2 s bound (the sibling suites use 10 s).
 /// A dropped response write leaves the client blocked on a read, and PIT's per-mutant

@@ -204,8 +204,8 @@ no HTTP client at all and therefore has no fixture bound whatsoever.
   whole effect is that the connector binds the wildcard instead of the
   requested host, which the started server's own connector reports
   synchronously — no clock, no socket, no watchdog. The leak itself is the
-  contaminated-evidence shape the new isolation bullet describes: a thread
-  whose cleanup an assertion failure skipped, diagnosable with
+  contaminated-evidence shape in HARDENING.md's "When a mutant won't die": a
+  thread whose cleanup an assertion failure skipped, diagnosable with
   `-PmutateOnly=…:JettyServerBuilder -PnoMutationHistory` against
   `-PmutateOnly=…:JettyServerBuilder -PisolateMutants`.
 
