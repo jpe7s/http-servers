@@ -259,7 +259,7 @@ final class JdkConformanceTest {
   }
 
   /// `Request.body()` may be read more than once and hands back the same bytes every time —
-  /// the Netty and FusionAuth backends return the body they hold, and the core contract names
+  /// the Netty backend returns the body it holds, and the core contract names
   /// no single-read restriction. jdk.httpserver's request stream is single-shot, so the adapter
   /// keeps the bytes; without that a handler's second read failed like a client leaving
   /// mid-upload — nothing answered, the connection closed, a `DEBUG` record — and a real handler
@@ -476,7 +476,7 @@ final class JdkConformanceTest {
 
   /// First value of `name` in the raw response head, or null when the header is absent.
   /// Matching is case-insensitive because header case is each backend's own: the jdk server
-  /// writes `Content-length`, jetty `Content-Length`, and java-http lower-cases everything.
+  /// writes `Content-length` and jetty `Content-Length`.
   private static String rawHeader(final String response, final String name) {
     final int endOfHead = response.indexOf("\r\n\r\n");
     final var head = endOfHead < 0 ? response : response.substring(0, endOfHead);
@@ -691,8 +691,6 @@ final class JdkConformanceTest {
   }
 
   /// A server that cannot bind must throw — never report success and hold a dead server.
-  /// (java-http itself logs-and-returns on a bind failure; the adapter's listener probe
-  /// converts that into the throw this case pins.)
   @Test
   void startOnAnOccupiedPortThrows() throws Exception {
     try (final var occupant = new ServerSocket(0, 50, java.net.InetAddress.getByName("localhost"))) {

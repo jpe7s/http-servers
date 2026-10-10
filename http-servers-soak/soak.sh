@@ -46,7 +46,7 @@ set -euo pipefail
 
 usage() {
   echo "usage: $0 <backend-factory> <duration-seconds> [connections=32] [heapMb=256]" >&2
-  echo "  backend-factory: JDKHttpServerBuilderFactory | JettyServerBuilderFactory | FusionAuthBuilderFactory | HelidonBuilderFactory | NettyBuilderFactory" >&2
+  echo "  backend-factory: JDKHttpServerBuilderFactory | JettyServerBuilderFactory | HelidonBuilderFactory | NettyBuilderFactory" >&2
   echo "  environment: SOAK_RSS_SLOPE_KIB_PER_HOUR=2048 SOAK_RSS_NOISE_FLOOR_KIB=8192 SOAK_THREAD_MARGIN=16 SOAK_FD_MARGIN=64" >&2
   echo "               SOAK_SEVERE_MARGIN=0 SOAK_WARMUP_SECONDS=max(60, duration/10)" >&2
   echo "               SOAK_JFR_MAXSIZE=512m SOAK_JFR_DUMP_TIMEOUT_SECONDS=600 SOAK_NMT_INTERVAL_SECONDS=1800" >&2

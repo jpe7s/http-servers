@@ -13,8 +13,8 @@ import java.util.Set;
 /// produce.
 ///
 /// The abuser sends a `Host` header on every request but the one that probes the `Host` rule,
-/// HTTP/1.0 included, because FusionAuth requires one on both versions and Jetty and Helidon on
-/// HTTP/1.1; the JDK and Netty require it on neither, so sending it costs nothing.
+/// HTTP/1.0 included: Jetty and Helidon require one on HTTP/1.1 only, and the JDK and Netty
+/// require it on neither version, so sending it on HTTP/1.0 too costs nothing.
 enum Backend {
 
   JDK("JDKHttpServerBuilderFactory",
@@ -34,15 +34,6 @@ enum Backend {
       new Expectation(Set.of(200), Closes.EITHER),
       new Expectation(Set.of(400), Closes.EITHER),
       30_000L,
-      false),
-  FUSIONAUTH("FusionAuthBuilderFactory",
-      -1L,
-      new Expectation(Set.of(200, 417), Closes.EITHER),
-      null,
-      new Expectation(Set.of(200), Closes.YES),
-      new Expectation(Set.of(400), Closes.EITHER),
-      new Expectation(Set.of(400), Closes.EITHER),
-      -1L,
       false),
   HELIDON("HelidonBuilderFactory",
       -1L,
@@ -113,7 +104,7 @@ enum Backend {
         return backend;
       }
     }
-    throw new IllegalArgumentException("unknown backend '" + name + "'; one of jdk, jetty, fusionauth, helidon, netty or a factory simple name");
+    throw new IllegalArgumentException("unknown backend '" + name + "'; one of jdk, jetty, helidon, netty or a factory simple name");
   }
 
   String factoryName() {
@@ -156,21 +147,21 @@ enum Backend {
   }
 
   /// An absolute-form target, `GET http://host:port/ping HTTP/1.1` with a matching `Host`:
-  /// refused 400 by Netty and FusionAuth, reduced to its path and served by the JDK and Jetty
+  /// refused 400 by Netty, reduced to its path and served by the JDK and Jetty
   /// (Jetty additionally refuses a `Host` naming another authority, so the probe's matches);
   /// not documented for Helidon, so `null` there.
   Expectation absoluteForm() {
     return absoluteForm;
   }
 
-  /// `GET /ping HTTP/1.1` with no `Host` at all: 400 on Jetty, FusionAuth and Helidon, served
+  /// `GET /ping HTTP/1.1` with no `Host` at all: 400 on Jetty and Helidon, served
   /// by the JDK and Netty, which require it on neither version.
   Expectation noHost() {
     return noHost;
   }
 
   /// The documented idle timeout for a silent connection between requests, or -1 where the
-  /// README documents none (FusionAuth, Helidon), in which case the idle probe is skipped. The
+  /// README documents none (Helidon), in which case the idle probe is skipped. The
   /// JDK checks its idle set on a 10 s timer tick, so the wait bound adds a margin well past
   /// that.
   long idleTimeoutMillis() {

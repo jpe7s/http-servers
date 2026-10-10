@@ -5,7 +5,6 @@ dependencies {
   project(":http-servers-core")
   runtimeOnly(project(":http-servers-jdk"))
   runtimeOnly(project(":http-servers-jetty"))
-  runtimeOnly(project(":http-servers-fusionauth"))
   runtimeOnly(project(":http-servers-helidon"))
   runtimeOnly(project(":http-servers-netty"))
 }

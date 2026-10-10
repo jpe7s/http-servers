@@ -17,7 +17,7 @@ import java.util.concurrent.Executor;
 /// - The `Executor` handed to `createServer` is accepted and ignored. Helidon runs every
 ///   request on its own virtual thread and refuses a response completed from any other
 ///   thread, and exposes no executor injection — so blocking and non-blocking handlers alike
-///   run inline on the request thread (the FusionAuth backend ignores the executor too).
+///   run inline on the request thread.
 /// - `initRestServer` returns an unstarted `WebServerConfig.Builder`, not a server: a Helidon
 ///   `WebServer` cannot be restarted once stopped and its `start()` logs a bind failure instead
 ///   of throwing, so [HelidonHttpServer] builds the `WebServer` inside its own `start()`.

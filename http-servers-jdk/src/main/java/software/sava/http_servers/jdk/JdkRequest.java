@@ -7,8 +7,8 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 
 /// The request body is read from the socket once, on the first [#body()] call, and the same
-/// bytes are handed back to every later call — as the Netty and FusionAuth backends do, which
-/// hold the body they already received. jdk.httpserver's request stream is single-shot (a read
+/// bytes are handed back to every later call — as the Netty backend does, which
+/// holds the body it already received. jdk.httpserver's request stream is single-shot (a read
 /// after `close()` fails with "Stream is closed"), so without the copy a handler's second read
 /// would look exactly like a client that left mid-upload.
 final class JdkRequest implements Request {

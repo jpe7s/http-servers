@@ -10,7 +10,7 @@ tests).
 
 ## hello suite (2 keys, both `SURVIVED`, both `# demo pedagogy`) — seeded 2026-07-22
 
-`HelloServerTests` boots the demo through ServiceLoader against all five
+`HelloServerTests` boots the demo through ServiceLoader against all four
 backends — the only end-to-end exercise of the provider wiring (both the
 module-path `provides` clauses and the classpath `META-INF/services` entries,
 which PIT's classpath minions resolve). `Entrypoint` is excluded from

@@ -8,8 +8,8 @@ info:
     `http-servers-hello` is the demo bootstrap for the sava http-servers stack. It resolves an
     `HttpServerBuilderFactory` over `ServiceLoader` by simple name, wires a single handler and
     starts the server, so the same surface is served by every backend (`JDKHttpServerBuilderFactory`,
-    `JettyServerBuilderFactory`, `FusionAuthBuilderFactory`). `Entrypoint` defaults to the Jetty
-    backend on `localhost:4242`.
+    `JettyServerBuilderFactory`, `HelidonBuilderFactory`, `NettyBuilderFactory`). `Entrypoint`
+    defaults to the Jetty backend on `localhost:4242`.
 
     The service exposes exactly one route, `GET /hello`. A second path, `/exclude`, exists in the
     source to demonstrate the wiring exclusion: it is offered to `HandlerWiring` but the `HELLO`
@@ -21,12 +21,12 @@ info:
     below to keep generated clients to one operation.
 
     **Backend-dependent error bodies.** The status codes and the `Allow` header are identical
-    across backends, but the bodies are not. The Jetty and FusionAuth controllers write a JSON
+    across backends, but the bodies are not. The Jetty, Helidon and Netty controllers write a JSON
     `{"msg": "..."}` explanation on `404` and `405`; the JDK backend sends those statuses with an
     empty body and no `Content-Type`. Treat the error body as advisory and branch on the status
     code. This is described per-response below.
 
-    **Backend-dependent CORS.** Only the Jetty and FusionAuth backends implement CORS. The JDK
+    **Backend-dependent CORS.** Only the Jetty, Helidon and Netty backends implement CORS. The JDK
     backend never writes `Access-Control-Allow-Origin` and has no pre-flight path, so `OPTIONS`
     there resolves as an ordinary method lookup and answers `405 Allow: GET`. A browser client
     therefore cannot make a cross-origin call against the JDK backend. The CORS-bearing responses
@@ -77,9 +77,9 @@ paths:
     options:
       tags: [hello]
       operationId: preflightHello
-      summary: CORS pre-flight for the greeting (Jetty and FusionAuth backends only).
+      summary: CORS pre-flight for the greeting (Jetty, Helidon and Netty backends only).
       description: |
-        **Jetty and FusionAuth backends only.** The JDK backend has no pre-flight path: every
+        **Jetty, Helidon and Netty backends only.** The JDK backend has no pre-flight path: every
         `OPTIONS` request there falls through to an ordinary method lookup and answers
         `405 Allow: GET`, whatever headers it carries.
 
@@ -112,7 +112,7 @@ paths:
       responses:
         '200':
           description: |
-            Pre-flight approved; the body is empty. Only reachable on the Jetty and FusionAuth
+            Pre-flight approved; the body is empty. Only reachable on the Jetty, Helidon and Netty
             backends, and only when the request carries both `Origin` and a resolvable
             `Access-Control-Request-Method`.
           headers:
@@ -150,7 +150,7 @@ components:
     Error:
       type: object
       description: |
-        Explanation written by the Jetty and FusionAuth controllers on `404` and `405`. The JDK
+        Explanation written by the Jetty, Helidon and Netty controllers on `404` and `405`. The JDK
         backend sends no body at all for these statuses.
       required: [msg]
       properties:
@@ -162,7 +162,7 @@ components:
     AccessControlAllowOrigin:
       description: |
         Echo of the request's `Origin`, written whenever that header is present. Absent otherwise —
-        the service does not emit a wildcard. Jetty and FusionAuth backends only; the JDK backend
+        the service does not emit a wildcard. Jetty, Helidon and Netty backends only; the JDK backend
         never writes this header.
       required: false
       schema:
@@ -181,7 +181,7 @@ components:
   responses:
     MethodNotAllowed:
       description: |
-        The path is registered but not for this method. Body is JSON on Jetty and FusionAuth,
+        The path is registered but not for this method. Body is JSON on Jetty, Helidon and Netty,
         empty on the JDK backend.
       headers:
         Allow:

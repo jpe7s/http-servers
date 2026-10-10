@@ -150,5 +150,5 @@ audit.
 Jetty's `blockingHandlersRunOnTheProvidedExecutor` and the jdk executor cases
 have no counterpart: Helidon runs each request on its own virtual thread,
 refuses a response completed from another thread and exposes no executor
-injection, so `HelidonServerBuilder` accepts and ignores the executor (as the
-FusionAuth adapter does). There is no wiring for such a test to pin.
+injection, so `HelidonServerBuilder` accepts and ignores the executor.
+There is no wiring for such a test to pin.

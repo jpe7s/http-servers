@@ -15,9 +15,9 @@ import java.util.concurrent.Executors;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Mirrors `FusionAuthPostHandlerTest`; the one addition is the 2 s request bound every
-/// request carries, for the reason `NettyConformanceTest` gives — a dropped write must fail
-/// the test before PIT's watchdog can, not hang until it.
+/// Mirrors `JdkPostHandlerTest` and `JettyPostHandlerTest`; the one addition is the 2 s
+/// request bound every request carries, for the reason `NettyConformanceTest` gives — a
+/// dropped write must fail the test before PIT's watchdog can, not hang until it.
 final class NettyPostHandlerTest {
 
   private static final Duration BOUND = Duration.ofSeconds(2);

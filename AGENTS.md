@@ -1,8 +1,8 @@
 # http-servers
 
 Java 25 multi-module library providing a small HTTP server abstraction (`http-servers-core`)
-with pluggable backends (`http-servers-jdk`, `http-servers-jetty`, `http-servers-fusionauth`,
-`http-servers-helidon`, `http-servers-netty`),
+with pluggable backends (`http-servers-jdk`, `http-servers-jetty`, `http-servers-helidon`,
+`http-servers-netty`),
 a demo module (`http-servers-hello`), an x402 payment gate for the Solana `exact` scheme
 (`http-servers-sava`), and an unpublished soak harness (`http-servers-soak`). Built with the
 shared `software.sava.build` Gradle plugin (same plugin family as the `sava` repo); the
@@ -80,8 +80,8 @@ the `hardening {}` block in each module's `build.gradle.kts`.
 <!-- hardening-template block:end -->
 
 CI owns `check`; the local release checklist owns `hardeningCertifyAll` and
-the explicit `fuzzAll` campaign. Complete certification means eight project
-receipts covering fourteen suites with no `.running` sentinel. The fuzz campaign
+the explicit `fuzzAll` campaign. Complete certification means seven project
+receipts covering twelve suites with no `.running` sentinel. The fuzz campaign
 must record both its time budget and parallel-target limit and exercise all five
 registered targets: `formatPlaceholders`, `pathCanonicalizer`, `handlerUtil`,
 `svmVerify`, and `x402Payload`.
@@ -90,7 +90,7 @@ registered targets: `formatPlaceholders`, `pathCanonicalizer`, `handlerUtil`,
 server and a load generator, run through `./http-servers-soak/soak.sh` (see the README's "Soak
 testing") — with no unit oracle to mutate against, for the same reason a load generator is never
 a PIT target. It applies no `hardening` plugin, registers no suite, is not published, and is not
-one of the eight receipts above. A run's `summary.md` is an operational record, not a
+one of the seven receipts above. A run's `summary.md` is an operational record, not a
 certification input; a defect it exposes is fixed and pinned in the owning backend's dispatch
 suite, never in the harness.
 
@@ -177,9 +177,7 @@ Helidon's own routing never decides a match. Versions come from `solana-version-
 The suite carries no socket-wait timeout family, unlike the jdk and jetty dispatch suites: a
 controller or handler that returns without completing the response is answered 500 by Helidon's
 own routing, so a dropped `send()` is a status mismatch the covering test sees at once rather
-than a client blocked on a read. There is no `loggerShim` partition either — Helidon logs through
-`System.Logger`, which reaches JUL with nothing installed, so there is no adapter-owned shim to
-mutate.
+than a client blocked on a read.
 
 Three adapter contracts the ratchet cannot infer are pinned by name: `initRestServer` returns an
 unstarted `WebServerConfig.Builder` because a Helidon `WebServer` cannot be restarted once

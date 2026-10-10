@@ -482,7 +482,7 @@ final class JettyConformanceTest {
 
   /// First value of `name` in the raw response head, or null when the header is absent.
   /// Matching is case-insensitive because header case is each backend's own: the jdk server
-  /// writes `Content-length`, jetty `Content-Length`, and java-http lower-cases everything.
+  /// writes `Content-length` and jetty `Content-Length`.
   private static String rawHeader(final String response, final String name) {
     final int endOfHead = response.indexOf("\r\n\r\n");
     final var head = endOfHead < 0 ? response : response.substring(0, endOfHead);
@@ -664,8 +664,6 @@ final class JettyConformanceTest {
   }
 
   /// A server that cannot bind must throw — never report success and hold a dead server.
-  /// (java-http itself logs-and-returns on a bind failure; the adapter's listener probe
-  /// converts that into the throw this case pins.)
   @Test
   void startOnAnOccupiedPortThrows() throws Exception {
     try (final var occupant = new ServerSocket(0, 50, java.net.InetAddress.getByName("localhost"));

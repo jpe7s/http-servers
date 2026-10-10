@@ -525,8 +525,8 @@ previews with the identical single-row candidate multiset, then
   sends nothing past the head until the `100` has arrived; in process,
   `anInterimResponseCompletesNothing` and `aContinueExpectationAtTheLimitIsInvited`.
 - The `Access-Control-Allow-Headers` null guard on the pre-flight path — Netty's
-  header map refuses the null the other backends treat as a no-op — is pinned by
-  `corsPreflightWithoutRequestHeadersAnswers`.
+  header map refuses the null, which Helidon also fails on and Jetty's header map
+  treats as a no-op — is pinned by `corsPreflightWithoutRequestHeadersAnswers`.
 - The `blocking()` booleans of `NettyQueryHandler` and
   `NettyCachedResponseHandler`, both directions, by
   `blockingHandlersRunOnTheProvidedExecutor` through a recording executor.

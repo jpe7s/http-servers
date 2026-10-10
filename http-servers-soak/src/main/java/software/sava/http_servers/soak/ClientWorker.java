@@ -122,9 +122,7 @@ final class ClientWorker implements Runnable {
 
   /// Half of the uploads are sent with `Transfer-Encoding: chunked` (an `InputStream`
   /// publisher has no known length) and half with a `Content-Length`, so both request
-  /// framings a client can produce cross every backend's parser; chunked request bodies are
-  /// where the backends have differed most (a chunked-encoding loop was fixed in java-http
-  /// after the version on Central).
+  /// framings a client can produce cross every backend's parser.
   private void echo() throws IOException, InterruptedException {
     final var body = new byte[rnd.nextInt(MAX_ECHO + 1)];
     rnd.nextBytes(body);

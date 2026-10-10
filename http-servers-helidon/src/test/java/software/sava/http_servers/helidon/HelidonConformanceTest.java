@@ -22,14 +22,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// custom status/header propagation (the x402 payment-gate shape), cached JSON responses,
 /// and case-insensitive request-header lookup.
 ///
-/// Mirrors `FusionAuthConformanceTest` test-for-test plus Jetty's error-body, logging and
-/// server-header pins, adapted only where Helidon's documented divergences require it (each
+/// It also pins routing and canonicalization, CORS, request bodies, the JSON error bodies,
+/// failure and framework logging, the absent identifying server headers, bodyless-status,
+/// HEAD and keep-alive framing, HTTP/1.0 and the `Host` rule, the bare-`?` query and the
+/// server lifecycle, adapted only where Helidon's documented divergences require it (each
 /// such case names its oracle): `http10RequestIsAnswered` pins the 505 refusal rather than an
 /// answer, and the bodyless and HEAD cases accept Helidon's `Content-Length: 0`. Deliberately
 /// absent: Jetty's `blockingHandlersRunOnTheProvidedExecutor` and the jdk executor cases —
 /// Helidon runs every request on its own virtual thread, refuses a response completed
 /// elsewhere and offers no executor injection, so the adapter ignores the executor it is
-/// given (as FusionAuth does); `theSuppliedExecutorReceivesNoWork` pins that negative instead.
+/// given; `theSuppliedExecutorReceivesNoWork` pins that negative instead.
 final class HelidonConformanceTest {
 
   private static int freePort() throws Exception {
@@ -212,7 +214,7 @@ final class HelidonConformanceTest {
     }
   }
 
-  /// Helidon's `header(name, value)` refuses a null value, where java-http and Jetty treat it
+  /// Helidon's `header(name, value)` refuses a null value, where Jetty treats it
   /// as "unset"; the adapter therefore guards the echo. Oracle: the Fetch standard only
   /// requires `Access-Control-Allow-Headers` when the pre-flight listed request headers.
   @Test
@@ -757,10 +759,10 @@ final class HelidonConformanceTest {
   }
 
   /// Helidon writes the entity on HEAD instead of stripping it, so the adapter answers HEAD
-  /// with status and headers only (the other backends send the JSON 405 body, which their
-  /// servers drop). Oracle: RFC 9110 section 9.3.2 — a HEAD response must not carry content,
-  /// and one that did would desync the next response on a keep-alive connection. The raw
-  /// socket read pins that nothing follows the header block.
+  /// with status and headers only (Jetty and Netty write the JSON 405 body, which their
+  /// servers drop; the JDK sends no 405 body). Oracle: RFC 9110 section 9.3.2 — a HEAD
+  /// response must not carry content, and one that did would desync the next response on a
+  /// keep-alive connection. The raw socket read pins that nothing follows the header block.
   @Test
   void headIsMethodNotAllowedWithAllow() throws Exception {
     final int port = serve(builder ->
@@ -864,11 +866,11 @@ final class HelidonConformanceTest {
     return received.toString(StandardCharsets.ISO_8859_1);
   }
 
-  /// A bare `?` reaches the handler as `null` here, where the JDK and Netty backends hand on
-  /// the empty string (RFC 3986 s3.4 says the query component begins at the `?`, so both
-  /// readings are defensible): Helidon's `UriQuery` is never null and a bare `?` carries
+  /// A bare `?` reaches the handler as `null` here, where the JDK, Jetty and Netty backends
+  /// hand on the empty string (RFC 3986 s3.4 says the query component begins at the `?`, so
+  /// both readings are defensible): Helidon's `UriQuery` is never null and a bare `?` carries
   /// `UriQuery.empty()`, indistinguishable from no query at all, which `HelidonRequest.query()`
-  /// maps to the contract's `null` — the FusionAuth side of the README's "empty query" row.
+  /// maps to the contract's `null` — the only `null` in the README's "empty query" row.
   /// Raw because HttpClient normalizes a bare `?` away.
   @Test
   void bareQuestionMarkYieldsANullQuery() throws Exception {
@@ -1021,9 +1023,8 @@ final class HelidonConformanceTest {
   }
 
   /// Helidon logs through `System.Logger`, whose default finder is JUL, so the framework's
-  /// own start-up logging reaches JUL with no shim installed — the property FusionAuth's
-  /// `frameworkLoggingFlowsThroughTheJulShim` pins through its adapter-installed logger
-  /// factory. Nothing in this module installs anything; the pin is that nothing needs to.
+  /// own start-up logging reaches JUL with no shim installed. Nothing in this module installs
+  /// anything; the pin is that nothing needs to.
   @Test
   void frameworkLoggingFlowsThroughJul() throws Throwable {
     final var records = recordLogs("io.helidon", () ->

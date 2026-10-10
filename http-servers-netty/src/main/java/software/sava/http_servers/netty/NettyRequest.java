@@ -18,8 +18,8 @@ import software.sava.http_servers.core.request.Request;
 /// is the raw request-target before it and [#query()] the raw text after it — `null` when
 /// there is no `?`, and the empty string for a bare `?`, matching the JDK backend. An
 /// absolute-form target (`GET http://host/p HTTP/1.1`) is not reduced to its path, so the
-/// shared routing refuses it with the ambiguous-path 400 — as java-http does; the JDK and
-/// Jetty servers reduce it to its path first.
+/// shared routing refuses it with the ambiguous-path 400; the JDK and Jetty servers reduce
+/// it to its path first.
 final class NettyRequest implements Request {
 
   private final String method;

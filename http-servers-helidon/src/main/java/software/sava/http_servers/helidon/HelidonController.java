@@ -12,7 +12,7 @@ import java.nio.charset.StandardCharsets;
 import static java.lang.System.Logger.Level.ERROR;
 
 /// Dispatches every request through the shared [HandlerMap] from a single catch-all route, so
-/// Helidon routing agrees with the JDK, Jetty and FusionAuth adapters: query-handler paths
+/// Helidon routing agrees with the JDK, Jetty and Netty adapters: query-handler paths
 /// match exactly (plus the builder's trailing-slash alias), only path handlers match by
 /// prefix, and the raw as-received path is what the map canonicalizes. Divergences from the
 /// other backends:
@@ -24,7 +24,9 @@ import static java.lang.System.Logger.Level.ERROR;
 ///   or blank `Host` header on HTTP/1.1; HTTP/1.0 never gets this far (505, see the README).
 /// - Helidon writes an entity on `HEAD` instead of stripping it, which would desync a
 ///   keep-alive connection. Error answers to `HEAD` (400/404/405) therefore carry status and
-///   headers only, where the other backends send the JSON body too. The `Content-Length` on
+///   headers only, where Netty, and Jetty for 404 and 405, write the JSON body and their
+///   servers drop it, and the JDK answers these statuses without a body for every method.
+///   The `Content-Length` on
 ///   such an answer is Helidon's `0` for an empty send, not the length the matching `GET`
 ///   would declare (RFC 9110 s9.3.2 says it should be) — a recorded choice: the framing of
 ///   the following response is what matters on a keep-alive connection, and `0` keeps it.

@@ -46,13 +46,13 @@ run.
 On 2026-07-22 `JettyHandler` was collapsed into Jetty's own `Handler` (it had
 become an empty marker) and the population dropped from 71 mutants to 61 when
 the `handlePreFlight` handler seam was removed: `JettyController` now writes the
-pre-flight response itself (mirroring `FusionAuthController`), so
+pre-flight response itself, so
 `JettyHandler.handlePreFlight`, `BaseJettyHandler.allowMethod` /
 `ALLOW_GET` / `ALLOW_POST` / `setResponseHeaders`, and `JettyQueryHandler`'s
 duplicate header write are all gone, along with their mutants. Handlers no
 longer advertise `Access-Control-Allow-Methods` on ordinary responses, which
 the CORS spec only defines for pre-flights — `allowMethodsHeaderIsPreflightOnly`
-now pins its absence on both this backend and FusionAuth. The replacement
+now pins its absence on this backend, Helidon and Netty. The replacement
 controller code is covered: both the `Access-Control-Allow-Methods` write and
 the `callback.succeeded()` completing the pre-flight are killed.
 
@@ -88,8 +88,9 @@ executor 2026-07-22).
 - `# blank-ACRM funnel` — `JettyController` 36 (`EQUAL_IF`): treating a blank
   `Access-Control-Request-Method` as a pre-flight looks up method `" "`, which
   no handler map contains — the same 405 + Allow the non-pre-flight path
-  returns. The non-blank contract itself is pinned by
-  `blankRequestMethodHeaderIsNotAPreflight`.
+  returns. `JettyConformanceTest` has no blank-method case; the rule is pinned
+  only by `blankRequestMethodHeaderIsNotAPreflight` in the Helidon and Netty
+  suites, against their own controllers.
 - `# null-origin no-op` — `JettyController` 70 (`EQUAL_IF` on `origin != null`): forcing the branch
   with a null origin makes `put(ACCESS_CONTROL_ALLOW_ORIGIN, null)` — a
   header *remove*, i.e. a no-op. The divergent sub-case (a pre-flight
@@ -113,7 +114,7 @@ executor 2026-07-22).
   controller harness with faked `Request`/`Response`/`Callback` (the
   `generateTestSupport` adoption trigger in AGENTS.md). Re-measure the
   UriCompliance claim on every Jetty major/minor bump — the 400-from-Jetty
-  measurement is what keeps these four equivalent. The jdk and fusionauth
+  measurement is what keeps these four equivalent. The jdk, helidon and netty
   twins of this branch are live and killed by `ambiguousPathsAreRefused`.
 - `# explicit-default doc` — `JettyServerBuilder` 53 (`setSendXPoweredBy(false)`
   removal): the flag's

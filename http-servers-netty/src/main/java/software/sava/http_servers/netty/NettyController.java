@@ -18,8 +18,10 @@ import static java.lang.System.Logger.Level.ERROR;
 
 /// The root handler of every connection: resolves the shared [HandlerMap] on the raw,
 /// undecoded request target, answers 400/404/405 with the same JSON bodies as the Jetty and
-/// FusionAuth controllers, reflects `Origin` into `Access-Control-Allow-Origin` and answers
-/// CORS pre-flights the same way they do.
+/// Helidon controllers, reflects `Origin` into `Access-Control-Allow-Origin` and answers
+/// CORS pre-flights the same way they do, except one sent as a lowercase `options`:
+/// Helidon's parser upper-cases the method token, so Helidon answers it as a pre-flight,
+/// while this controller, like Jetty's, answers it as an unknown method (405).
 ///
 /// It decides *what* to answer; the connection's ordering and persistence belong to the
 /// [NettyRequestGate] in front of the aggregator, which hands this controller one aggregated
@@ -54,11 +56,11 @@ import static java.lang.System.Logger.Level.ERROR;
 ///   `Connection reset` [IOException]. Either is the peer going away, not a failure of this
 ///   server: both are logged at `DEBUG`, nothing is written, and the connection is closed.
 /// - An HTTP/1.1 request without a `Host` header (or with a blank one) is answered, not
-///   refused with the 400 RFC 9112 §3.2 asks for — parity with the JDK backend; Jetty,
-///   FusionAuth and Helidon refuse it.
+///   refused with the 400 RFC 9112 §3.2 asks for — parity with the JDK backend; Jetty and
+///   Helidon refuse it.
 /// - An absolute-form request target (`GET http://host/p HTTP/1.1`) is refused with the
-///   ambiguous-path 400 by the shared routing, as on FusionAuth; the JDK and Jetty servers
-///   reduce it to its path first (see [NettyRequest]).
+///   ambiguous-path 400 by the shared routing; the JDK and Jetty servers reduce it to its
+///   path first (see [NettyRequest]).
 /// - A request whose head has arrived but whose body has stopped is closed by the idle
 ///   timeout 30 s after the last byte decoded, with nothing written — as Jetty does, failing
 ///   a handler that is waiting for that body with a `500` and closing; the JDK backend, whose
@@ -100,8 +102,8 @@ final class NettyController extends SimpleChannelInboundHandler<FullHttpRequest>
     final String accessControlRequestMethod;
     final boolean preFlight;
     // case-sensitive on purpose: RFC 9110 §9.1 makes the method token case-sensitive, so a
-    // lowercase "options" is an unknown method here (405), where the Jetty and FusionAuth
-    // controllers' is() would treat it as a pre-flight
+    // lowercase "options" is an unknown method here (405), as on Jetty; Helidon's parser
+    // upper-cases the token, so there it can still be a pre-flight
     if (HttpMethod.OPTIONS.name().equals(request.method())) {
       accessControlRequestMethod = request.header("Access-Control-Request-Method");
       preFlight = accessControlRequestMethod != null && !accessControlRequestMethod.isBlank();
@@ -151,7 +153,8 @@ final class NettyController extends SimpleChannelInboundHandler<FullHttpRequest>
         responseHeaders.set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_METHODS, method);
         final var requestHeaders = request.header("Access-Control-Request-Headers");
         if (requestHeaders != null) {
-          // DefaultHttpHeaders refuses a null value where the other backends treat it as a no-op
+          // DefaultHttpHeaders refuses a null value, which Helidon also fails on (its adapter
+          // guards the same echo) and Jetty's put() treats as a remove, i.e. a no-op
           responseHeaders.set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, requestHeaders);
         }
         ctx.writeAndFlush(response);

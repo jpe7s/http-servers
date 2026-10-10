@@ -17,8 +17,7 @@ edges the ratchet cannot see.
 | http-servers-core | `pitestHandlers`, `pitestWiring`, `pitestServer`, `pitestResponse`, `pitestLogging` | wiring/server/response run at 100% with empty baselines; `response` also owns `core.request` |
 | http-servers-jdk | `pitestDispatch` | 100%, empty baseline |
 | http-servers-jetty | `pitestDispatch` | carries the load-flappy handled-flag family |
-| http-servers-fusionauth | `pitestDispatch`, `pitestLoggerShim` | see the partition note |
-| http-servers-helidon | `pitestDispatch` | 100%, empty baseline; no `loggerShim` partition (System.Logger reaches JUL with no shim), no socket-wait timeout family (Helidon's routing answers 500 for an unsent response) |
+| http-servers-helidon | `pitestDispatch` | 100%, empty baseline; no socket-wait timeout family (Helidon's routing answers 500 for an unsent response) |
 | http-servers-netty | `pitestDispatch` | no accepted rows (the `# backpressure` row was pruned when ordering moved into `NettyRequestGate`); 2 s fixture bound, not 10 s (every hang it can produce is bounded, so a dropped write reads KILLED not TIMED_OUT); the idle timeout is pinned on an advanced fake clock in process (the loop's ticker, and the gate's clock at a negative origin), with one real-time socket case (200 ms timeout, 2 s bound) and a 1 ns re-arm floor so the deadline boundary mutant reads KILLED, not a frozen-clock TIMED_OUT; a stalled request body counts as idle (the slowloris shape closes one timeout after its last byte) and only a fully received request awaiting its response is exempt |
 | http-servers-hello | `pitestHello` | demo module, still ratcheted |
 | http-servers-sava | `pitestX402`, `pitestHandlers` | the payment-gate threat surface |
@@ -34,15 +33,17 @@ edges the ratchet cannot see.
   root-escaping `..`) answer 400 without routing. The same suites require
   bodyless 204/304 responses, a byte-identical 512 KiB POST, HEAD as 405 with
   `Allow`, 500 for throwing handlers, custom status/header propagation, cached
-  JSON responses, case-insensitive header lookup, a never-null body, and CORS
-  pre-flight handling (a blank requested method is not a pre-flight). These
-  are socket-level oracles shared by all five backends, not framework-local
-  conveniences.
+  JSON responses, case-insensitive header lookup, and a never-null body. These
+  are socket-level oracles shared by all four backends, not framework-local
+  conveniences. CORS is not shared: the Jetty, Helidon and Netty suites pin
+  pre-flight handling, only Helidon's and Netty's pin that a blank requested
+  method is not a pre-flight, and the JDK backend has no CORS handling, which
+  its suite pins as `optionsAnswers405WithoutCorsSupport`.
 - **Socket kills are load-sensitive.** Every adapter dispatch suite kills
   through real socket round trips, so detection wall clock rides on gate
-  parallelism: coordinates flip `SURVIVED <-> TIMED_OUT` under `qualityGate`
-  load (jetty's handled-flag family, fusionauth's gate-load-only audited
-  timeout). Baselines hold the union, audited timeout sets name the members —
+  parallelism: coordinates flip between `SURVIVED` and detected under
+  `qualityGate` load (jetty's handled-flag family). Baselines hold the
+  union, audited timeout sets name the members —
   neither is drift to "fix". Which member of a flappy family flips is itself
   load-dependent; a quiet run on one row is not the family settling.
   Since sava-build 21.5.25 a *finite* `KILLED <-> TIMED_OUT` race is no longer
@@ -99,11 +100,6 @@ edges the ratchet cannot see.
   What is owed is vigilance: the audit is key-level, so if line 75 ever timed
   out the membership would absorb it silently, which is why the module README
   names it for human reviewers.
-- **The fusionauth logging partition is a handoff, not a hole.** java-http's
-  own threads log through `FusionAuthJulLogger`, so mutating the shim under
-  socket tests can wedge a run past PIT's timeout (observed 40+ min,
-  2026-07-22). `dispatch` excludes `fusionauth.logging.*`; `loggerShim` owns it
-  with in-process tests.
 - **Declined exclusions.** Both are recorded with `declineExclusionAudit` at
   their registration site, where the measured reason lives: `hello.Entrypoint`
   (thin main — a port-argument default and an eternal sleep; the boot flow it
@@ -141,7 +137,7 @@ edges the ratchet cannot see.
   cross-module tests are outside the owning suite's pattern. That is why the
   probe-and-branch fixture lives in core's own test sources.
 - **No fuzz workflow, on purpose.** CI owns `check`; the local release checklist
-  owns `hardeningCertifyAll` (eight project receipts, fourteen suites, no running
+  owns `hardeningCertifyAll` (seven project receipts, twelve suites, no running
   sentinel) and `fuzzAll` (all five registered targets). Record both
   `maxFuzzTime` and `maxParallelFuzzTargets`. A manual GitHub campaign may be
   added for optional exploration, but this repo does not treat one as release

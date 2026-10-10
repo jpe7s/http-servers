@@ -15,8 +15,8 @@ import static java.util.Objects.requireNonNull;
 
 /// Builds a server over Netty 4.2 (NIO transport, HTTP/1.x codec). The package is not
 /// exported, so consumers reach this builder only through `HttpServerBuilderFactory` and
-/// the four tuning knobs below are fixed at their defaults for them — like the JDK and
-/// FusionAuth backends, which expose no knobs either; the wider constructor exists for this
+/// the three tuning knobs below are fixed at their defaults for them — like the JDK and
+/// Helidon backends, which expose no knobs either; the wider constructor exists for this
 /// package's own tests.
 final class NettyServerBuilder extends BaseHttpServerBuilder<NettyHandler, NettyHttpServer> {
 

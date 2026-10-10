@@ -26,15 +26,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// custom status/header propagation (the x402 payment-gate shape), cached JSON responses,
 /// and case-insensitive request-header lookup.
 ///
-/// Mirrors `FusionAuthConformanceTest` case for case, with two documented exceptions:
-/// `frameworkLoggingFlowsThroughTheJulShim` (java-http needs a logger shim to reach JUL,
-/// while Netty's `InternalLoggerFactory` selects JUL on its own whenever no SLF4J/Log4j is
-/// present, so there is no adapter-owned shim installation to pin here), and the sibling's
-/// `http10RequestIsAnswered`, which appears here split into `http10RequestIsAnsweredThenClosed`
-/// and `http10KeepAliveIsHonoured` because Netty answers the 1.0 form on both sides of the
-/// keep-alive rule. The cases after the mirrored block pin what this backend adds —
-/// per-connection response ordering under pipelining, HTTP/1.0, the codec's 400/413 answers,
-/// executor placement and lifecycle.
+/// The cases above the "what this backend adds" divider pin that shared contract; those after
+/// it pin what this backend adds — per-connection response ordering under pipelining,
+/// HTTP/1.0, the codec's 400/413 answers, executor placement and lifecycle. Where each sibling
+/// suite has one `http10RequestIsAnswered`, this one has `http10RequestIsAnsweredThenClosed`
+/// and `http10KeepAliveIsHonoured`, because Netty answers the 1.0 form on both sides of the
+/// keep-alive rule. There is no framework-logging case: Netty's `InternalLoggerFactory`
+/// selects JUL on its own whenever no SLF4J/Log4j is present, so there is no adapter-owned
+/// shim installation to pin here.
 ///
 /// Every server started through `serve`/`start` (or `absentHostBindsAllInterfaces`'s direct
 /// starts) is registered and stopped in an `@AfterEach`, so no connection or event-loop
@@ -542,7 +541,7 @@ final class NettyConformanceTest {
     for (final var target : new String[]{
         "/files%2F..%2Fecho", "/files/%2e%2e/echo", "/files/a\\b", "/a%2541", "/echo/../../echo", "//echo",
         // absolute-form: NettyRequest does not reduce it to its path, so the shared routing
-        // refuses it (as java-http does; the JDK and Jetty servers reduce it first)
+        // refuses it (the JDK and Jetty servers reduce it first)
         "http://elsewhere.example/echo"}) {
       final var response = rawGet(port, target);
       assertEquals(400, rawStatus(response), target + " -> " + response);
@@ -794,9 +793,9 @@ final class NettyConformanceTest {
 
   /// An HTTP/1.1 request with no Host header is answered 200, where RFC 9112 §3.2 requires
   /// 400 — parity with the JDK backend (probed the same way: also 200), a divergence from
-  /// Jetty, FusionAuth and Helidon, which refuse it. Pinned so the choice is a recorded one
-  /// rather than an accident; NettyController's "Known divergences" names it. Oracle: the JDK
-  /// backend as the parity reference, java-http as the backend that refuses.
+  /// Jetty and Helidon, which refuse it. Pinned so the choice is a recorded one rather than
+  /// an accident; NettyController's "Known divergences" names it. Oracle: the JDK backend as
+  /// the parity reference, Jetty as the backend that refuses.
   @Test
   void hostlessHttp11IsAnswered() throws Exception {
     final int port = serve(builder ->
@@ -1093,8 +1092,8 @@ final class NettyConformanceTest {
   /// it stands for — which a handler answering 304 here cannot know — so the adapter sends
   /// no framing at all, as the JDK adapter does with contentLen -1.
   ///
-  /// The Content-Type assertion is what keeps the two absences honest (the reason
-  /// FusionAuth's `assertBodylessFraming` carries it): every other check here expects a
+  /// The Content-Type assertion is what keeps the two absences honest (the reason the
+  /// sibling suites' `assertBodylessFraming` carries it): every other check here expects a
   /// header to be missing, so a `rawHeader` that always answered null would satisfy them all
   /// while proving nothing — and dropping the body must not drop the declared type either.
   @Test
@@ -1222,7 +1221,8 @@ final class NettyConformanceTest {
   /// A pre-flight without `Access-Control-Request-Headers` is still a pre-flight (the Fetch
   /// standard sends that header only when the actual request carries non-safelisted
   /// headers); it is answered with the origin and method and no Allow-Headers, where Netty's
-  /// header map would otherwise refuse the null value the other backends treat as a no-op.
+  /// header map would otherwise refuse the null value, which Helidon also fails on and
+  /// Jetty's header map treats as a no-op.
   @Test
   void corsPreflightWithoutRequestHeadersAnswers() throws Exception {
     final int port = serve(builder ->

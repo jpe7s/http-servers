@@ -5,7 +5,7 @@ module software.sava.http_servers.helidon {
   requires transitive software.sava.http_servers.core;
 
   // The backend is reached only through HttpServerBuilderFactory (the module exports no
-  // package and the builder is package-private), matching the jdk and fusionauth backends
+  // package and the builder is package-private), matching the jdk backend
   // and the sibling netty module — so io.helidon.webserver is a plain requires, not
   // transitive: no exported type names a Helidon type.
   requires io.helidon.webserver;

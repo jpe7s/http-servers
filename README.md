@@ -10,7 +10,6 @@ A small HTTP server abstraction for Java 25 with pluggable backends. Write handl
 | `http-servers-core`       | The API: `Request`, `HttpResponse`, handler registration, routing, wiring.       |
 | `http-servers-jdk`        | Backend over the JDK's built-in `jdk.httpserver`. No extra dependencies.         |
 | `http-servers-jetty`      | Backend over Jetty 12. HTTP/1.1 and H2C, optional gzip, CORS.                    |
-| `http-servers-fusionauth` | Backend over [java-http](https://github.com/FusionAuth/java-http). CORS.         |
 | `http-servers-helidon`    | Backend over Helidon WebServer 4. HTTP/1.1 on virtual threads, H2C opt-in, CORS. |
 | `http-servers-netty`      | Backend over Netty 4.2. HTTP/1.1 on the Netty codec, CORS.                       |
 | `http-servers-hello`      | Runnable demo wiring one handler against any of the backends.                    |
@@ -19,8 +18,10 @@ A small HTTP server abstraction for Java 25 with pluggable backends. Write handl
 Depend on `http-servers-core` plus exactly one backend. The backends are interchangeable: the same
 handlers, registration calls and routing semantics apply to all of them.
 
-Wherever a backend's own wire behaviour differs from the rest, the difference is written down
-under [Backend divergences](#backend-divergences).
+[Backend divergences](#backend-divergences) and [CORS](#cors) record where a backend's own wire
+behaviour is known to differ from the rest. Error bodies differ too and are not covered there: for
+example, a `404` or `405` answering a `GET` carries a JSON body on Jetty, Helidon and Netty and
+none on the JDK backend.
 
 ## Dependency configuration
 
@@ -101,10 +102,10 @@ serves `/files/a/b`.
 `Request` exposes `method()`, `path()`, `query()`, `header(name)` and `body()`. The query string is
 **raw**: separators arrive as literal `&`, while a `&` or `=` that belongs to a value stays
 percent-encoded, so it can never be mistaken for a separator. `query()` is `null` when the request
-has none, header lookup is case-insensitive, and `body()` is never `null`. On the JDK, Netty and
-FusionAuth backends `body()` hands back the same bytes however many times it is read — the JDK
-adapter reads the socket once and keeps them, Netty holds the body it decoded, java-http caches
-its own first read; Jetty and Helidon are not pinned either way.
+has none, header lookup is case-insensitive, and `body()` is never `null`. On the JDK and Netty
+backends `body()` hands back the same bytes however many times it is read — the JDK adapter
+reads the socket once and keeps them, Netty holds the body it decoded; Jetty and Helidon are not
+pinned either way.
 
 `HandlerUtil` in `software.sava.http_servers.core.handlers` parses that raw string. It matches a
 parameter only at a boundary — the start of the query or just after a `&` — so `page=` never
@@ -133,7 +134,7 @@ what a caller may rely on rather than the bytes any one backend happens to emit.
 **Bodyless statuses.** A `204` or a `304` is sent without a body everywhere, and no backend
 chunks either of them. `Content-Length: 0` is the backend's own choice: the JDK and Netty
 backends send neither `Content-Length` nor `Transfer-Encoding` on either status, Jetty omits
-`Content-Length` on `204` and sends `Content-Length: 0` on `304`, and FusionAuth and Helidon send
+`Content-Length` on `204` and sends `Content-Length: 0` on `304`, and Helidon sends
 `Content-Length: 0` on both. Assert that `Content-Length` is absent or exactly `0`, never that it
 is present. Helidon treats `205` as bodyless too, because that is its own no-entity set, so
 content a handler attaches to a `205` is dropped there and sent by every other backend.
@@ -142,8 +143,8 @@ content a handler attaches to a `205` is dropped there and sent by every other b
 honoured by the JDK backend for every exchange — `jdk.httpserver` dispatches each one onto it,
 and blocking and non-blocking handlers alike run there, on the dispatching thread — and on the
 blocking path by the Jetty and Netty backends, which dispatch blocking request handling onto it.
-Netty runs non-blocking routes and cached responses inline on its event loop instead. FusionAuth
-and Helidon own their worker threads and ignore the executor, so code that needs to observe or
+Netty runs non-blocking routes and cached responses inline on its event loop instead. Helidon
+owns its worker threads and ignores the executor, so code that needs to observe or
 bound handler dispatch has to pick the JDK, Jetty or Netty backend. The JDK backend used to hand
 non-blocking handlers to a second executor of its own; it no longer does, because `jdk.httpserver`
 can only clean up an exchange that fails on the thread it dispatched it to (see below).
@@ -164,28 +165,26 @@ its own transfer time — up to `jdk.httpserver`'s drain amount (`sun.net.httpse
 64 KiB by default), past which the head is written and the connection closed after it, as before.
 A handler that throws is still answered `500` and logged at `ERROR`.
 
-**HTTP/1.0.** The JDK, Jetty, FusionAuth and Netty backends answer an `HTTP/1.0` request, subject
-to the `Host` rule below, and close the connection afterwards unless it asks for
+**HTTP/1.0.** The JDK, Jetty and Netty backends answer an `HTTP/1.0` request and close the
+connection afterwards unless it asks for
 `Connection: keep-alive`. Helidon refuses it with `505`. Every backend replies in `HTTP/1.1`
 whatever version the request names.
 
 **The `Host` header.** RFC 9112 makes `Host` mandatory from `HTTP/1.1` onwards, and Jetty enforces
 exactly that: `400` for an `HTTP/1.1` request without one or with a blank one, and a normal answer
-to the `HTTP/1.0` form. FusionAuth requires `Host` on every request, `HTTP/1.0` included, and
-answers `400` without it. Helidon answers `400` for an `HTTP/1.1` request with a missing or blank
+to the `HTTP/1.0` form. Helidon answers `400` for an `HTTP/1.1` request with a missing or blank
 `Host`, and refuses the `HTTP/1.0` form before that rule applies. The JDK and Netty backends
 require it on neither version.
 
 **An empty query.** A request target ending in a bare `?` reaches the handler as an empty `query()`
-on the JDK, Jetty and Netty backends and as `null` on FusionAuth and Helidon. Treat the empty
+on the JDK, Jetty and Netty backends and as `null` on Helidon. Treat the empty
 string and `null` alike; `HandlerUtil` already does.
 
 **H2C.** Jetty serves cleartext HTTP/2 out of the box. Helidon serves it once
 `io.helidon.webserver:helidon-webserver-http2` is added as a `runtimeOnly` dependency, which also
 replaces its clean `HTTP/1.0` `505` with no answer at all: the connection is closed with zero
 bytes when a `Host` header is present and held open until the idle timeout when it is not. Do not
-enable it in front of `HTTP/1.0` clients. The JDK, FusionAuth and Netty backends speak HTTP/1.1
-only.
+enable it in front of `HTTP/1.0` clients. The JDK and Netty backends speak HTTP/1.1 only.
 
 **Connection persistence.** A handler that sets `Connection: close` on its response ends the
 connection after that response on every backend: the header reaches the wire and the server
@@ -244,13 +243,13 @@ waiting is left to finish and its response is still delivered. Netty's rule is J
 counts and diverges from the JDK only in closing the stalled body.
 
 **Absolute-form targets.** A request line in absolute form, `GET http://host/p HTTP/1.1`, is
-refused with `400` by Netty and FusionAuth, which route on the target as received. The JDK and
+refused with `400` by Netty, which routes on the target as received. The JDK and
 Jetty servers reduce it to its path first and serve it, and Jetty additionally answers `400` when
 the `Host` header names a different authority than the target does.
 
 ### CORS
 
-The Jetty, FusionAuth, Helidon and Netty backends reflect the request `Origin` into
+The Jetty, Helidon and Netty backends reflect the request `Origin` into
 `Access-Control-Allow-Origin` and answer pre-flight `OPTIONS` requests for any method that
 resolves to a handler. These servers are expected to sit behind a proxy or gateway that owns
 origin policy and authentication. The JDK backend has no CORS handling, so a pre-flight `OPTIONS`

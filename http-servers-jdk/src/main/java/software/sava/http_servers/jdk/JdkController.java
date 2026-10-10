@@ -10,7 +10,7 @@ import static java.lang.System.Logger.Level.DEBUG;
 import static java.lang.System.Logger.Level.ERROR;
 
 /// Dispatches every request through the shared [HandlerMap] from a single root context, so
-/// JDK routing agrees with the Jetty and FusionAuth adapters: query-handler paths match
+/// JDK routing agrees with the Jetty, Helidon and Netty adapters: query-handler paths match
 /// exactly (plus the builder's trailing-slash alias) and only path handlers match by
 /// prefix. Registering one jdk-httpserver context per path would instead prefix-match
 /// everything — `/echo` would serve `/echo/anything`.
