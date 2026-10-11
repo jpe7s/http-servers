@@ -52,9 +52,9 @@ final class JettyController extends Handler.Sequence {
         request.consumeAvailable();
         final var allowedMethods = lookup.allowedMethods();
         if (lookup.badRequest()) {
-          // Jetty's UriCompliance rejects ambiguous targets before this handler runs;
-          // this branch is the backstop if a consumer relaxes compliance on the builder's
-          // HttpConfiguration
+          // Jetty's UriCompliance rejects ambiguous targets before this handler runs; what
+          // reaches this branch is a target it passes and the shared routing refuses, such as
+          // the asterisk form (OPTIONS *), and any target a consumer's relaxed compliance allows
           response.setStatus(400);
           responseHeaders.put(JSON_CONTENT);
           Content.Sink.write(response, true, """

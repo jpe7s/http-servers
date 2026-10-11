@@ -35,13 +35,13 @@ The `1 stale entries` notice a gate run prints is this flip, not rot — the
 row survives in solo mode, so pruning it makes the next solo run fail the
 ratchet with an unexplained `SURVIVED`.
 
-**Removal criterion for the union rows** (per
-HARDENING.md, written when the union is written): drop a union row only when
-its cause is removed — handlers no longer returning the handled flag after
-committing the response, or Jetty ceasing to ignore it — or after 3
-consecutive `pitestModeCompare` cycles observe it detected in both modes;
-re-measure with the snapshot/compare pair, never prune from a single quiet
-run.
+**Removal criterion for the union rows** (per HARDENING.md, written when the
+union is written): drop a union row only when its cause is removed — handlers
+no longer returning the handled flag after committing the response, or Jetty's
+`writeError` no longer only failing the callback of a committed response — or
+after 3 consecutive `pitestModeCompare` cycles observe it detected in both
+modes; re-measure with the snapshot/compare pair, never prune from a single
+quiet run.
 
 On 2026-07-22 `JettyHandler` was collapsed into Jetty's own `Handler` (it had
 become an empty marker) and the population dropped from 71 mutants to 61 when
@@ -76,25 +76,28 @@ executor 2026-07-22).
 - **`# handled-flag family`**: mutants on the boolean a `Handler.handle`
   returns. The members are these `JettyController.handle` returns: the `return
   true` after its own 400/404/405, after the pre-flight and after the catch's
-  500, and the routed `return handler.handle(…)`. They also include
-  `JettyQueryHandler.handle` and `JettyCachedJsonResponseHandler.handle`, each
-  after its write. The routed return's `true` direction is equivalent rather
-  than racy: both routed handlers return `true` unconditionally, so replacing
-  their result with `true` changes nothing. For every other member, the mutant's
-  `false` comes after the write or `callback.succeeded()` that committed the
-  response, and Jetty answers a `false` with `Response.writeError(…, 404)`
-  (`HttpChannelState`'s handler invoker). On a committed response, `writeError`
-  only fails the callback. That is a no-op once the write has completed it
-  (`ChannelCallback` ignores a second completion), and an aborted response while
-  the write is still in flight. The machine's load decides that race, so these
-  are the rows observed to flip under load. The catch's `return true` was
-  already a member while the catch failed the callback. Since the catch writes
-  the JSON 500 itself (2026-10-10), it races like the rest. It was killed in
-  that day's solo history-free run and survived under certification the same
-  evening. In that run it was matched by the row whose `# line` tag still names
-  the old catch, so the line-drift advisory at this key names the catch's
-  current line. That reading is this member, not a swap. Its tag lags until a
-  run that sees it survive is retagged.
+  500, and the `false` direction of the routed `return handler.handle(…)`. They
+  also include `JettyQueryHandler.handle` and
+  `JettyCachedJsonResponseHandler.handle`, each after its write. Jetty answers a
+  `false` with `Response.writeError(…, 404)` (`HttpChannelState`'s handler
+  invoker), which on a committed response only fails the callback: a no-op once
+  the write has completed it (`ChannelCallback` ignores a second completion),
+  and an aborted response while the write is still in flight. The pre-flight's
+  `false` is always the no-op, because its `callback.succeeded()` completes the
+  exchange before the return, so that member is equivalent rather than racing.
+  For every other member the machine's load decides the race, so these are the
+  rows observed to flip under load. The routed return's `false` races only
+  because the adapter's handlers write before they return. Its `true` direction
+  is no member: a routed raw `Handler` that declines, which
+  `JettyServerBuilder`'s protected `addQueryHandler` allows, must get Jetty's
+  404, and `aRoutedHandlerThatDeclinesIsAnsweredWithJettys404` kills it. The
+  catch's `return true` was already a member while the catch failed the
+  callback. Since the catch writes the JSON 500 itself (2026-10-10), it races
+  like the rest. It was killed in that day's solo history-free run and survived
+  under certification the same evening. In that run it was matched by the row
+  whose `# line` tag still names the old catch, so the line-drift advisory at
+  this key names the catch's current line. That reading is this member, not a
+  swap. Its tag lags until a run that sees it survive is retagged.
 - The former wildcard-bind family (`initRestServer` 34 both skip-directions,
   35 `setHost` removal) was killed 2026-07-24 by `startOnAnOccupiedPortThrows`:
   the occupied `localhost` address makes a wildcard bind dodge the conflict

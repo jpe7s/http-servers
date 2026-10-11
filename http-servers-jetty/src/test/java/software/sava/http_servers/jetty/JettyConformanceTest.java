@@ -711,6 +711,44 @@ final class JettyConformanceTest {
     }
   }
 
+  /// The asterisk form, `OPTIONS *` (RFC 9112 §3.2.4), is a target Jetty's `UriCompliance`
+  /// passes and the shared routing refuses: Jetty exempts `OPTIONS` (and `PRI` and `CONNECT`)
+  /// from its rooted-path check, `*` is not a rooted path, so `PathCanonicalizer` rejects it and
+  /// the controller answers the ambiguous-path 400 with its JSON body, as the Helidon and Netty
+  /// controllers do. On a default builder such targets are the way into that branch.
+  @Test
+  void asteriskFormIsAnsweredWithTheAmbiguousPath400() throws Exception {
+    final int port = serve(builder ->
+        builder.nonBlockingQueryHandler("/x", request -> HttpResponse.response("text/plain", "x")));
+    final var exchange = rawExchange(port, "OPTIONS * HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    final var response = exchange.response();
+    assertEquals(400, rawStatus(response), response);
+    assertEquals("application/json", rawHeader(response, "Content-Type"), response);
+    org.junit.jupiter.api.Assertions.assertTrue(rawBody(response).contains("\"msg\": \"Ambiguous request path.\""), response);
+  }
+
+  /// The routed `return handler.handle(…)` passes on the routed handler's own answer to
+  /// whether it took the request. The adapter's handlers always do, but `JettyServerBuilder`
+  /// routes any Jetty `Handler` registered through its protected `addQueryHandler`, and one that
+  /// declines must get Jetty's 404, not a request left waiting on a callback no one completes.
+  @Test
+  void aRoutedHandlerThatDeclinesIsAnsweredWithJettys404() throws Exception {
+    final var builder = new JettyServerBuilder() {
+      {
+        addQueryHandler("GET", "/declines", new org.eclipse.jetty.server.Handler.Abstract.NonBlocking() {
+          @Override
+          public boolean handle(final org.eclipse.jetty.server.Request request,
+                                final org.eclipse.jetty.server.Response response,
+                                final org.eclipse.jetty.util.Callback callback) {
+            return false;
+          }
+        });
+      }
+    };
+    final var response = rawGet(start(builder), "/declines");
+    assertEquals(404, rawStatus(response), response);
+  }
+
   @Test
   void dotSegmentsAndBenignEscapesRouteCanonically() throws Exception {
     final int port = serve(builder -> {
