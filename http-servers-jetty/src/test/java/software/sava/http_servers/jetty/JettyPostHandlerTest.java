@@ -9,6 +9,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -40,6 +41,7 @@ final class JettyPostHandlerTest {
       final var postResponse = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/echo"))
               .POST(HttpRequest.BodyPublishers.ofString("hello-post"))
+              .timeout(Duration.ofSeconds(2))
               .build(),
           BodyHandlers.ofString()
       );
@@ -49,6 +51,7 @@ final class JettyPostHandlerTest {
       final var getResponse = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/ping"))
               .GET()
+              .timeout(Duration.ofSeconds(2))
               .build(),
           BodyHandlers.ofString()
       );
@@ -73,6 +76,7 @@ final class JettyPostHandlerTest {
       final var getResponse = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/resource"))
               .GET()
+              .timeout(Duration.ofSeconds(2))
               .build(),
           BodyHandlers.ofString()
       );
@@ -82,6 +86,7 @@ final class JettyPostHandlerTest {
       final var postResponse = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/resource"))
               .POST(HttpRequest.BodyPublishers.ofString("payload"))
+              .timeout(Duration.ofSeconds(2))
               .build(),
           BodyHandlers.ofString()
       );
@@ -91,6 +96,7 @@ final class JettyPostHandlerTest {
       final var deleteResponse = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/resource"))
               .DELETE()
+              .timeout(Duration.ofSeconds(2))
               .build(),
           BodyHandlers.ofString()
       );

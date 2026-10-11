@@ -114,7 +114,7 @@ final class JettyThreadBudgetTest {
          final var client = HttpClient.newHttpClient()) {
       final var ping = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + owned.port() + "/ping"))
-              .timeout(Duration.ofSeconds(10))
+              .timeout(Duration.ofSeconds(2))
               .GET()
               .build(),
           BodyHandlers.ofString()
@@ -124,7 +124,7 @@ final class JettyThreadBudgetTest {
 
       final var echo = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + owned.port() + "/echo"))
-              .timeout(Duration.ofSeconds(10))
+              .timeout(Duration.ofSeconds(2))
               .POST(HttpRequest.BodyPublishers.ofString("small host"))
               .build(),
           BodyHandlers.ofString()

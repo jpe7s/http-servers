@@ -20,6 +20,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /// on: the raw query string, 500 on a throwing handler or a non-final status (never a hang or
 /// connection abort), custom status/header propagation (the x402 payment-gate shape), cached
 /// JSON responses, and case-insensitive request-header lookup.
+///
+/// Every client request and raw socket read carries a 2 s bound, as in the Netty suite (the
+/// JDK and Helidon suites use 10 s). A removed write leaves Jetty's `Callback` uncompleted and
+/// the client blocked on a read, and PIT's per-mutant watchdog fires at the recorded duration
+/// × 1.25 + 4000 ms, so a 10 s bound never fired first: those mutants read `TIMED_OUT`,
+/// detected by the clock rather than by this suite. At 2 s the bound beats the watchdog, and a
+/// hang fails its test as a timeout exception, an assertion-level kill.
 final class JettyConformanceTest {
 
   private static final software.sava.http_servers.core.server.HttpServerBuilderFactory FACTORY =
@@ -42,7 +49,7 @@ final class JettyConformanceTest {
       throws Exception {
     return client.send(
         HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + pathAndQuery))
-            .timeout(Duration.ofSeconds(10))
+            .timeout(Duration.ofSeconds(2))
             .GET()
             .build(),
         BodyHandlers.ofString()
@@ -104,7 +111,7 @@ final class JettyConformanceTest {
     try (final var client = HttpClient.newHttpClient()) {
       final var response = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/boom"))
-              .timeout(Duration.ofSeconds(10))
+              .timeout(Duration.ofSeconds(2))
               .header("Origin", "https://example.test")
               .GET()
               .build(),
@@ -286,7 +293,7 @@ final class JettyConformanceTest {
     try (final var client = HttpClient.newHttpClient()) {
       final var response = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/cached"))
-              .timeout(Duration.ofSeconds(10))
+              .timeout(Duration.ofSeconds(2))
               .GET()
               .build(),
           BodyHandlers.ofByteArray()
@@ -306,7 +313,7 @@ final class JettyConformanceTest {
     try (final var client = HttpClient.newHttpClient()) {
       final var response = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/h"))
-              .timeout(Duration.ofSeconds(10))
+              .timeout(Duration.ofSeconds(2))
               .header("x-payment", "header-value")
               .GET()
               .build(),
@@ -355,7 +362,7 @@ final class JettyConformanceTest {
     try (final var client = HttpClient.newHttpClient()) {
       final var preflight = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/pay"))
-              .timeout(Duration.ofSeconds(10))
+              .timeout(Duration.ofSeconds(2))
               .method("OPTIONS", HttpRequest.BodyPublishers.noBody())
               .header("Origin", "https://app.example")
               .header("Access-Control-Request-Method", "POST")
@@ -382,7 +389,7 @@ final class JettyConformanceTest {
     try (final var client = HttpClient.newHttpClient()) {
       final var response = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/simple"))
-              .timeout(Duration.ofSeconds(10))
+              .timeout(Duration.ofSeconds(2))
               .header("Origin", "https://app.example")
               .GET()
               .build(),
@@ -403,7 +410,7 @@ final class JettyConformanceTest {
     try (final var client = HttpClient.newHttpClient()) {
       final var response = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/np"))
-              .timeout(Duration.ofSeconds(10))
+              .timeout(Duration.ofSeconds(2))
               .POST(HttpRequest.BodyPublishers.ofString("posted"))
               .build(),
           BodyHandlers.ofString()
@@ -434,7 +441,7 @@ final class JettyConformanceTest {
     try (final var client = HttpClient.newHttpClient()) {
       final var response = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/simple"))
-              .timeout(Duration.ofSeconds(10))
+              .timeout(Duration.ofSeconds(2))
               .header("Origin", "https://app.example")
               .header("Access-Control-Request-Method", "GET")
               .GET()
@@ -453,7 +460,7 @@ final class JettyConformanceTest {
     try (final var client = HttpClient.newHttpClient()) {
       final var response = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/simple"))
-              .timeout(Duration.ofSeconds(10))
+              .timeout(Duration.ofSeconds(2))
               .header("Origin", "https://app.example")
               .method("OPTIONS", HttpRequest.BodyPublishers.noBody())
               .build(),
@@ -549,7 +556,7 @@ final class JettyConformanceTest {
 
       final var post = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/p"))
-              .timeout(Duration.ofSeconds(10))
+              .timeout(Duration.ofSeconds(2))
               .header("Origin", "https://app.example")
               .POST(HttpRequest.BodyPublishers.ofString("x"))
               .build(),
@@ -597,7 +604,7 @@ final class JettyConformanceTest {
 
       final var wrongMethod = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/simple"))
-              .timeout(Duration.ofSeconds(10))
+              .timeout(Duration.ofSeconds(2))
               .method("DELETE", HttpRequest.BodyPublishers.noBody())
               .build(),
           BodyHandlers.ofString());
@@ -610,7 +617,7 @@ final class JettyConformanceTest {
   /// One raw-socket exchange, written onto the wire exactly as given and read until the
   /// server closes the connection. HttpClient normalizes or refuses the ambiguous targets
   /// these cases exist to pin, always speaks HTTP/1.1, and always sends a Host header, so
-  /// none of those shapes can be expressed through it. `closed` is false when the 10 s
+  /// none of those shapes can be expressed through it. `closed` is false when the 2 s
   /// SO_TIMEOUT expired with the connection still open; for an HTTP/1.0 request that is the
   /// property under test, not a harness failure.
   private record RawExchange(String response, boolean closed) {
@@ -618,7 +625,7 @@ final class JettyConformanceTest {
 
   private static RawExchange rawExchange(final int port, final String request) throws Exception {
     try (final var socket = new java.net.Socket("127.0.0.1", port)) {
-      socket.setSoTimeout(10_000);
+      socket.setSoTimeout(2_000);
       final var out = socket.getOutputStream();
       out.write(request.getBytes(StandardCharsets.US_ASCII));
       out.flush();
@@ -783,7 +790,7 @@ final class JettyConformanceTest {
     try (final var client = HttpClient.newHttpClient()) {
       final var response = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/big"))
-              .timeout(Duration.ofSeconds(10))
+              .timeout(Duration.ofSeconds(2))
               .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
               .build(),
           BodyHandlers.ofByteArray());
@@ -799,7 +806,7 @@ final class JettyConformanceTest {
     try (final var client = HttpClient.newHttpClient()) {
       final var response = client.send(
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/echo"))
-              .timeout(Duration.ofSeconds(10))
+              .timeout(Duration.ofSeconds(2))
               .method("HEAD", HttpRequest.BodyPublishers.noBody())
               .build(),
           BodyHandlers.ofString());
