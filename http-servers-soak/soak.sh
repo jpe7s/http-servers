@@ -546,9 +546,9 @@ REQ_TOTAL=$(progress_field total)
 REQ_FLOOR=$(progress_field floor)
 SKIPPED_CASES=$(progress_field skipped_cases)
 # SEVERE records the load provokes by design: one per GET /fail, and up to one per upload abandoned
-# mid-body, whether by a reset or a half-close — the JDK backend's handler fails on either (the body
-# read ends in 'Connection reset' or 'connection closed before all data received'), Netty logs the
-# reset or drops it silently — so the expected count is a ceiling and a shortfall is not counted
+# mid-body, whether by a reset or a half-close. The Jetty and Helidon backends fail the handler's body
+# read on either and log it at SEVERE; the JDK and Netty backends treat the departure as the client
+# leaving and log it at DEBUG. So the expected count is a ceiling, and a shortfall is not counted
 # against the run.
 FAIL_OPS=$(last_counter 'op:fail')
 ABORT_RST=$(last_counter 'case:abort_mid_body:rst')

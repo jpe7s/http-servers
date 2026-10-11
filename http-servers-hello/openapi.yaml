@@ -86,10 +86,13 @@ paths:
 
         On the backends that support it, a request is treated as a pre-flight only when it is
         `OPTIONS` **and** carries a non-blank `Access-Control-Request-Method`. The controller
-        resolves that requested method against the handler map: if it resolves, the pre-flight is
-        approved and answered directly by the controller with an empty body; if it does not, the
-        ordinary `404`/`405` path applies — so a pre-flight for `POST` on `/hello` gets
-        `405 Allow: GET`.
+        resolves that requested method against the handler map. If it does not resolve, the
+        ordinary `404`/`405` path applies, so a pre-flight for `POST` on `/hello` gets
+        `405 Allow: GET`. If it resolves and the request carries an `Origin`, the pre-flight is
+        approved and answered directly by the controller with an empty body. If it resolves but
+        no `Origin` is present, the controller does not answer it: the request goes to the
+        requested method's handler, so `OPTIONS /hello` with `Access-Control-Request-Method: GET`
+        and no `Origin` gets the greeting.
 
         The CORS headers are only written when the request carries an `Origin`. An `OPTIONS`
         request without `Access-Control-Request-Method` is not a pre-flight and falls through to
@@ -115,7 +118,8 @@ paths:
           description: |
             Pre-flight approved; the body is empty. Only reachable on the Jetty, Helidon and Netty
             backends, and only when the request carries both `Origin` and a resolvable
-            `Access-Control-Request-Method`.
+            `Access-Control-Request-Method`. Without `Origin`, the same request is answered by the
+            requested method's handler instead (see the description above).
           headers:
             Access-Control-Allow-Origin:
               $ref: '#/components/headers/AccessControlAllowOrigin'
