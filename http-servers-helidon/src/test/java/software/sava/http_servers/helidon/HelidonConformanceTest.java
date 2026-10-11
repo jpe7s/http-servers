@@ -18,9 +18,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Pins the parts of the core Request/HttpResponse contract that every backend must agree
-/// on: the raw query string, 500 on a throwing handler (never a hang or connection abort),
-/// custom status/header propagation (the x402 payment-gate shape), cached JSON responses,
-/// and case-insensitive request-header lookup.
+/// on: the raw query string, 500 on a throwing handler or a non-final status (never a hang or
+/// connection abort), custom status/header propagation (the x402 payment-gate shape), cached
+/// JSON responses, and case-insensitive request-header lookup.
 ///
 /// It also pins routing and canonicalization, CORS, request bodies, the JSON error bodies,
 /// failure and framework logging, the absent identifying server headers, bodyless-status,
@@ -520,6 +520,48 @@ final class HelidonConformanceTest {
     }
   }
 
+  /// An `Error` from a handler (a failed `assert`, say) is a handler failure like any
+  /// `RuntimeException`: blocking, non-blocking and cached routes alike answer it with the
+  /// controller's JSON 500 and log it at ERROR, which JUL records as SEVERE. Left to Helidon's
+  /// own error handling it would be answered with a `text/plain` "Internal Server Error" and
+  /// logged at WARNING under Helidon's logger instead. Each route throws its own instance so
+  /// the log assertion can tell that every one of them was reported.
+  @Test
+  void handlerErrorAnswersTheJson500() throws Throwable {
+    final var blocking = new AssertionError("blocking handler bug");
+    final var nonBlocking = new AssertionError("non-blocking handler bug");
+    final var cached = new AssertionError("cached response bug");
+    final int port = serve(builder -> {
+      builder.blockingQueryHandler("/blocking", request -> {
+        throw blocking;
+      });
+      builder.nonBlockingQueryHandler("/non-blocking", request -> {
+        throw nonBlocking;
+      });
+      builder.cachedQueryHandler("/cached", () -> {
+        throw cached;
+      });
+    });
+
+    final var logs = recordLogs(HelidonController.class.getName(), () -> {
+      try (final var client = HttpClient.newHttpClient()) {
+        for (final var target : new String[]{"/blocking", "/non-blocking", "/cached"}) {
+          final var response = get(client, port, target);
+          assertEquals(500, response.statusCode(), target + " -> " + response.body());
+          assertEquals("application/json", response.headers().firstValue("Content-Type").orElse(null),
+              target + " must get the controller's JSON 500, not Helidon's own: " + response.body());
+          assertTrue(response.body().contains("\"msg\": \"Failed to process request.\""),
+              target + " -> " + response.body());
+        }
+      }
+    });
+    for (final var error : java.util.List.of(blocking, nonBlocking, cached)) {
+      assertTrue(logs.stream().anyMatch(record ->
+              record.getThrown() == error && java.util.logging.Level.SEVERE.equals(record.getLevel())),
+          "the Error must be logged at ERROR, not swallowed: " + error.getMessage());
+    }
+  }
+
   /// One raw-socket exchange, written onto the wire exactly as given and read until the
   /// server closes the connection. HttpClient normalizes or refuses the ambiguous targets
   /// these cases exist to pin, always speaks HTTP/1.1, and always sends a Host header, so
@@ -679,9 +721,10 @@ final class HelidonConformanceTest {
   }
 
   /// 205 rides along with the cross-backend 204/304 pair: it is in Helidon's no-entity set
-  /// (`Http1ServerResponse`, {204, 205, 304}), where the other backends send whatever the
-  /// handler attached, so the adapter has to treat it as bodyless here (RFC 9110 s15.3.6 — a
-  /// 205 must not generate content) rather than let Helidon answer 500.
+  /// (`Http1ServerResponse`, {204, 205, 304}), and Netty's codec drops a 205's content too,
+  /// while the JDK and Jetty backends send whatever the handler attached; the adapter has to
+  /// treat it as bodyless here (RFC 9110 s15.3.6 — a 205 must not generate content) rather
+  /// than let Helidon answer 500.
   @Test
   void noContentAndNotModifiedCrossTheWireWithoutABody() throws Exception {
     final int port = serve(builder -> {
@@ -931,6 +974,46 @@ final class HelidonConformanceTest {
         assertEquals(200, rawStatus(next), "the connection must still be in sync after the 500: " + next);
         assertEquals("fine", rawBody(next), next);
       }
+    }
+  }
+
+  /// A handler that answers with a non-final status has failed like one that throws:
+  /// `HttpResponse.checkFinalStatus` refuses the status before anything is written, and the
+  /// controller answers with its JSON 500 and none of the handler's headers. Oracle: RFC 9110
+  /// s15.2 — a 1xx is an interim answer that a final response must follow, and it ends with its
+  /// header section, so a 103 sent with content would leave the client waiting for a final
+  /// answer while the content sits where the next status line belongs. Read over a persistent
+  /// socket, as the case above is, so the next request proves the connection stayed in sync.
+  @Test
+  void nonFinalStatusAnswersTheJson500() throws Exception {
+    final int port = serve(builder -> {
+      builder.blockingQueryHandler("/early", request ->
+          HttpResponse.response(103, "text/plain", "early".getBytes(StandardCharsets.UTF_8))
+              .withHeader("Link", "</style.css>; rel=preload"));
+      builder.blockingQueryHandler("/ok", request -> HttpResponse.response("text/plain", "fine"));
+    });
+    try (final var socket = new java.net.Socket("127.0.0.1", port)) {
+      socket.setSoTimeout(10_000);
+      final var out = socket.getOutputStream();
+      final var in = socket.getInputStream();
+      out.write("GET /early HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
+      out.flush();
+      final var failed = readResponse(in);
+      assertEquals(500, rawStatus(failed), failed);
+      assertEquals("application/json", rawHeader(failed, "Content-Type"),
+          "the 500 is the controller's JSON answer: " + failed);
+      final var body = rawBody(failed);
+      assertTrue(body.contains("\"msg\": \"Failed to process request.\""), failed);
+      assertEquals(String.valueOf(body.getBytes(StandardCharsets.ISO_8859_1).length),
+          rawHeader(failed, "Content-Length"), failed);
+      org.junit.jupiter.api.Assertions.assertNull(rawHeader(failed, "Link"),
+          "the handler's headers must not reach the error answer: " + failed);
+
+      out.write("GET /ok HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
+      out.flush();
+      final var next = readResponse(in);
+      assertEquals(200, rawStatus(next), "the connection must still be in sync after the 500: " + next);
+      assertEquals("fine", rawBody(next), next);
     }
   }
 

@@ -30,9 +30,12 @@ import static java.lang.System.Logger.Level.ERROR;
 ///   such an answer is Helidon's `0` for an empty send, not the length the matching `GET`
 ///   would declare (RFC 9110 s9.3.2 says it should be) — a recorded choice: the framing of
 ///   the following response is what matters on a keep-alive connection, and `0` keeps it.
-/// - Helidon refuses a response completed from another thread, so a throwing handler is
-///   answered with 500 on the request thread here — blocking and non-blocking alike — and the
-///   failure is logged through `System.Logger` before Helidon's own error handling sees it.
+/// - Helidon refuses a response completed from another thread, so a handler that throws a
+///   `RuntimeException` or an `Error` is answered with the JSON 500 on the request thread here
+///   — blocking, non-blocking and cached routes alike — and the failure is logged at ERROR
+///   through `System.Logger`; Helidon's own error handling would answer it with a `text/plain`
+///   500 and log it at WARNING under its own logger. A response whose status is not final
+///   fails the same way, since `ResponseUtil` throws for it before writing anything.
 ///   A send that fails part-way (a header value Helidon refuses, for instance) has already
 ///   stamped its `Content-Length` and the offending header on the response, so the 500 clears
 ///   the headers first and frames its own body.
@@ -118,10 +121,10 @@ final class HelidonController implements Handler {
       }
       try {
         handler.handle(request, response);
-      } catch (final RuntimeException e) {
-        // Helidon would answer 500 itself, but only after logging at WARNING through its own
-        // logger; owning the answer keeps the failure in this module's log and off Helidon's
-        // error-handling path
+      } catch (final RuntimeException | Error e) {
+        // Helidon would answer 500 itself, as text/plain, and log it at WARNING through its own
+        // logger; owning the answer keeps the JSON error shape, keeps the failure in this
+        // module's log and keeps it off Helidon's error-handling path
         logger.log(ERROR, "Failed to process request.", e);
         // a send that failed during header validation has already stamped Content-Length (and
         // the refused header) on the response; Helidon only fills in a missing length, so the
