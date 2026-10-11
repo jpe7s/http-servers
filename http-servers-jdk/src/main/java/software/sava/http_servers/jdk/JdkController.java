@@ -5,6 +5,9 @@ import com.sun.net.httpserver.HttpHandler;
 import software.sava.http_servers.core.handlers.HandlerMap;
 
 import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static java.lang.System.Logger.Level.DEBUG;
 import static java.lang.System.Logger.Level.ERROR;
@@ -30,20 +33,25 @@ import static java.lang.System.Logger.Level.ERROR;
 ///   `ServerImpl.closeConnection` (:642-663) removes it, which `ServerImpl.Exchange.run` calls
 ///   when an exception escapes the handler chain and no `WriteFinished` was posted:
 ///   `catch (Exception e) { ... if (tx == null || !tx.writefinished) closeConnection(connection); }`
-///   (:894-898).
+///   (:894-898). An `Error` passes that clause: the `catch (Throwable t)` behind it only logs it
+///   at `TRACE` and rethrows (:899-902).
 /// - A failure that reaches neither is a leak for the life of the server. `ExchangeImpl.close`
 ///   (:125-152) answers an `IOException` from closing the streams with a bare
 ///   `connection.close()` (:149-151): the channel is closed, the `HttpConnection` stays
 ///   registered, and — with `sun.net.httpserver.maxReqTime`/`maxRspTime` unset — no timer
 ///   ever visits `reqConnections`/`rspConnections` (`ReqRspTimeoutTask` is scheduled only when
 ///   `reqRspTimeoutEnabled`, :159-161). Work handed to another executor after `handle`
-///   returned cannot reach `closeConnection` at all.
+///   returned cannot reach `closeConnection` at all, and an `Error` escaping `handle` reaches
+///   neither with nothing written: the client is never answered and the channel stays open.
 ///
 /// Hence no executor hop (see [JdkQueryHandler]), no swallowed `IOException`, and the
 /// bodyless answers go through [#answerWithoutBody], which moves the one drain the JDK would
 /// swallow onto this frame. A client that leaves is logged at `DEBUG` and its connection is
-/// closed; a handler that throws is logged at `ERROR` and answered `500` — and if writing
-/// that `500` fails, the failure escapes like any other.
+/// closed. A handler that throws — a `RuntimeException` or an `Error`, and [JdkQueryHandler]
+/// throws for a status that is not final — is logged at `ERROR` and answered a bare `500`
+/// that carries none of the response headers the handler set before it failed, only those
+/// jdk.httpserver set itself (its HTTP/1.0 `Connection` echo); and if writing that `500`
+/// fails, the failure escapes like any other.
 final class JdkController implements HttpHandler {
 
   private static final System.Logger logger = System.getLogger(JdkController.class.getName());
@@ -75,15 +83,26 @@ final class JdkController implements HttpHandler {
         }
         return;
       }
+      // jdk.httpserver has already put its own HTTP/1.0 Connection echo (and Keep-Alive) on the
+      // response (ServerImpl.java:841-851); a failed handler's 500 keeps it. The value lists are
+      // copied too, since Headers.add appends to the server's list in place
+      final var serverHeaders = exchange.getResponseHeaders().entrySet().stream()
+          .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, entry -> List.copyOf(entry.getValue())));
       try {
         handler.handle(exchange);
       } catch (final JdkRequest.BodyReadException e) {
         // the client's doing, not the handler's: logged and closed below, never a 500
         throw e;
-      } catch (final RuntimeException e) {
-        // without this the jdk server aborts the connection, and the client sees EOF, not a status
+      } catch (final RuntimeException | Error e) {
+        // without this the jdk server aborts the connection on a RuntimeException, so the client
+        // sees EOF, not a status, and on an Error neither answers nor closes it
         logger.log(ERROR, "Failed to process request.", e);
         try (exchange) {
+          // the handler may have failed with its Content-Type and some of its own headers set;
+          // the 500 carries only what the server had set before it ran
+          final var responseHeaders = exchange.getResponseHeaders();
+          responseHeaders.clear();
+          responseHeaders.putAll(serverHeaders);
           answerWithoutBody(exchange, 500);
         }
       }
@@ -96,17 +115,20 @@ final class JdkController implements HttpHandler {
     }
   }
 
-  /// Answers `status` with no body. jdk.httpserver frames `contentLen -1` with neither
-  /// `Content-Length` nor `Transfer-Encoding` and ends the exchange itself:
-  /// `ExchangeImpl.sendResponseHeaders` runs `if (noContentToSend) { ros.flush(); close(); }`
-  /// (ExchangeImpl.java:287-290). The head's flush (:288) sits outside any `try`, so a failed
-  /// flush already escapes; the `close()` behind it (:289) does not. `ExchangeImpl.close` closes
-  /// the request stream (:145-147), and `LeftOverInputStream.close` reads and discards whatever
-  /// of a declared body the handler left unread (:64-72, up to `sun.net.httpserver.drainAmount`).
-  /// A client that resets or half-closes during that drain throws inside `close()`'s `try`,
-  /// which catches the `IOException` and calls a bare `connection.close()` (:149-151): the
-  /// channel is closed and the connection stays registered. Closing the request body here
-  /// first runs the same drain on the caller's frame, where its failure escapes [#handle] and
+  /// Answers `status` with no body. jdk.httpserver frames `contentLen -1` with
+  /// `Content-length: 0` (ExchangeImpl.java:256-264), never with `Transfer-Encoding`, which only
+  /// a `contentLen` of `0` selects (:248-255); a `1xx` or `204` status gets no length header at
+  /// all (:222-233, :261), and neither does a `304` or any answer to `HEAD` (:235-246). Either
+  /// way it ends the exchange itself: `ExchangeImpl.sendResponseHeaders` runs
+  /// `if (noContentToSend) { ros.flush(); close(); }` (:287-290). The head's flush (:288) sits
+  /// outside any `try`, so a failed flush already escapes; the `close()` behind it (:289) does
+  /// not. `ExchangeImpl.close` closes the request stream (:145-147), and
+  /// `LeftOverInputStream.close` reads and discards whatever of a declared body the handler left
+  /// unread (:64-72, up to `sun.net.httpserver.drainAmount`). A client that resets or
+  /// half-closes during that drain throws inside `close()`'s `try`, which catches the
+  /// `IOException` and calls a bare `connection.close()` (:149-151): the channel is closed and
+  /// the connection stays registered. Closing the request body here first runs the same drain
+  /// on the caller's frame, where its failure escapes [#handle] and
   /// `ServerImpl.closeConnection` unregisters the connection; once it has been read to its
   /// declared end the JDK's own `close()` has nothing left to drain. A body the drain limit
   /// leaves unread is the dispatcher's business, as before: `WriteFinished` with

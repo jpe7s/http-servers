@@ -10,7 +10,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -22,11 +24,15 @@ import java.util.logging.LogRecord;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Pins the parts of the core Request/HttpResponse contract that every backend must agree
-/// on: the raw query string, 500 on a throwing handler (never a hang or connection abort),
-/// custom status/header propagation (the x402 payment-gate shape), cached JSON responses,
+/// on: the raw query string, 500 on a failed handler (one that throws, an `Error` included, or
+/// returns a status that is not final; never a hang or connection abort, and never with the
+/// failed handler's headers), custom status/header propagation (the x402 payment-gate shape),
+/// cached JSON responses,
 /// and case-insensitive request-header lookup — and, at the end, the adapter's connection
 /// hygiene: a client that leaves mid-exchange never leaves a connection registered in
 /// jdk.httpserver.
@@ -117,6 +123,12 @@ final class JdkConformanceTest {
     }
   }
 
+  /// A handler failure is logged at `ERROR` — JUL `SEVERE` — with the failure attached.
+  private static void assertHandlerFailureLogged(final List<LogRecord> logs, final Class<? extends Throwable> failure) {
+    assertTrue(logs.stream().anyMatch(r -> r.getLevel() == Level.SEVERE && failure.isInstance(r.getThrown())),
+        "the handler failure must be logged at ERROR, not swallowed: " + describe(logs));
+  }
+
   @Test
   void throwingBlockingHandlerAnswers500() throws Throwable {
     final int port = serve(builder ->
@@ -132,6 +144,21 @@ final class JdkConformanceTest {
     org.junit.jupiter.api.Assertions.assertTrue(
         logs.stream().anyMatch(r -> r.getThrown() instanceof IllegalStateException),
         "the handler failure must be logged, not swallowed");
+  }
+
+  /// An `Error` is a handler failure like a `RuntimeException`: a bare 500, logged at `ERROR`.
+  /// jdk.httpserver closes the connection only for an `Exception` and rethrows an `Error` (see
+  /// JdkController), so before the guard caught it the client was answered nothing, not even
+  /// EOF, and the connection stayed registered.
+  @Test
+  void anErrorInABlockingHandlerAnswers500() throws Throwable {
+    final int port = serve(builder ->
+        builder.blockingQueryHandler("/error", request -> {
+          throw new StackOverflowError("handler recursion");
+        }));
+
+    final var logs = recordLogs(JdkController.class.getName(), () -> assertBare500(rawGet(port, "/error")));
+    assertHandlerFailureLogged(logs, StackOverflowError.class);
   }
 
   /// Non-blocking handlers run inline on the server executor (see JdkQueryHandler), so the
@@ -154,6 +181,19 @@ final class JdkConformanceTest {
         "the handler failure must be logged, not swallowed");
   }
 
+  /// The non-blocking route's `Error` meets the same guard as the blocking route's: both run
+  /// inline on the server executor.
+  @Test
+  void anErrorInANonBlockingHandlerAnswers500() throws Throwable {
+    final int port = serve(builder ->
+        builder.nonBlockingQueryHandler("/error", request -> {
+          throw new StackOverflowError("handler recursion");
+        }));
+
+    final var logs = recordLogs(JdkController.class.getName(), () -> assertBare500(rawGet(port, "/error")));
+    assertHandlerFailureLogged(logs, StackOverflowError.class);
+  }
+
   @Test
   void statusAndCustomHeadersCrossTheWire() throws Exception {
     final int port = serve(builder ->
@@ -168,6 +208,85 @@ final class JdkConformanceTest {
       assertEquals("application/json", response.headers().firstValue("Content-Type").orElse(null));
       assertEquals("{\"error\":\"payment required\"}", response.body());
     }
+  }
+
+  /// A header jdk.httpserver refuses — `Headers.set` throws `IllegalArgumentException` for a
+  /// value with a bare LF — fails the handler with its `Content-Type`, and every header ahead of
+  /// the refused one, already on the response. The headers are an insertion-ordered map so the
+  /// valid one provably goes first; the 500 must carry none of them.
+  @Test
+  void aRefusedHeaderAnswers500WithoutTheHandlersHeaders() throws Exception {
+    final var headers = new LinkedHashMap<String, String>();
+    headers.put("X-Handler", "set-before-failure");
+    headers.put("X-Refused", "bare\nLF");
+    final int port = serve(builder ->
+        builder.blockingQueryHandler("/refused", request ->
+            HttpResponse.response(200, "text/plain", headers, "unreached".getBytes(StandardCharsets.UTF_8))));
+
+    assertBare500(rawGet(port, "/refused"), "X-Handler", "X-Refused");
+  }
+
+  /// The 500 drops what the handler set, not what the server set. jdk.httpserver puts its own
+  /// `Connection` echo on an HTTP/1.0 exchange's response before any handler runs
+  /// (ServerImpl.java:841-851): `keep-alive` with a `Keep-Alive` timeout for a request that asks
+  /// to be kept, and `close` for one that sends no `Connection` header (an explicit
+  /// `Connection: close` gets no echo). A failed handler's 500 still announces what the server
+  /// decided. The two requests share one socket, so the first answer's `keep-alive` is
+  /// also kept, and the second's `close` ends the exchange.
+  @Test
+  void aFailedHandlersAnswerKeepsTheServersHttp10Echo() throws Exception {
+    final int port = serve(builder ->
+        builder.blockingQueryHandler("/boom", request -> {
+          throw new IllegalStateException("handler bug");
+        }));
+
+    final var exchange = rawExchange(port, "GET /boom HTTP/1.0\r\nConnection: keep-alive\r\n\r\n"
+        + "GET /boom HTTP/1.0\r\n\r\n");
+    final var response = exchange.response();
+    assertEquals(500, rawStatus(response), response);
+    assertEquals("keep-alive", rawHeader(response, "Connection"), response);
+    assertNotNull(rawHeader(response, "Keep-Alive"), response);
+    final int second = response.indexOf("HTTP/1.1 500", 1);
+    assertTrue(second > 0, "the kept connection must answer the second request: " + response);
+    assertEquals("close", rawHeader(response.substring(second), "Connection"), response);
+    assertTrue(exchange.closed(), "HTTP/1.0 without keep-alive ends the exchange: " + response);
+  }
+
+  /// The snapshot of the server's own headers copies their value lists as well as the map:
+  /// `Headers.add` appends to a list in place, so a raw handler — one a `JdkServerBuilder`
+  /// subclass registers through `addQueryHandler` — that adds to the server's `Connection` echo
+  /// and then throws must not leave its line on the 500. The first answer keeps exactly the
+  /// server's `keep-alive`; the second request ends the exchange as in the test above.
+  @Test
+  void aRawHandlersAddedHeaderStaysOffThe500() throws Exception {
+    final var builder = new JdkServerBuilder() {
+      {
+        addQueryHandler("GET", "/append", exchange -> {
+          exchange.getResponseHeaders().add("Connection", "close");
+          throw new IllegalStateException("handler bug");
+        });
+      }
+    };
+    final var exchange = rawExchange(start(builder), "GET /append HTTP/1.0\r\nConnection: keep-alive\r\n\r\n"
+        + "GET /append HTTP/1.0\r\n\r\n");
+    final var response = exchange.response();
+    final var firstHead = response.substring(0, response.indexOf("\r\n\r\n"));
+    assertEquals(500, rawStatus(response), response);
+    assertEquals(1, firstHead.lines().filter(line -> line.regionMatches(true, 0, "Connection:", 0, 11)).count(),
+        "the 500 must carry the server's Connection echo alone: " + response);
+    assertEquals("keep-alive", rawHeader(response, "Connection"), response);
+    assertTrue(exchange.closed(), response);
+  }
+
+  /// A response without a body fails in the adapter, at `body.length`, once its headers are on
+  /// the response; the 500 must carry none of them.
+  @Test
+  void aNullBodyAnswers500WithoutTheHandlersHeaders() throws Exception {
+    final int port = serve(builder ->
+        builder.blockingQueryHandler("/null-body", request ->
+            HttpResponse.response(200, "text/plain", Map.of("X-Handler", "null-body"), null)));
+
+    assertBare500(rawGet(port, "/null-body"), "X-Handler");
   }
 
   @Test
@@ -187,6 +306,29 @@ final class JdkConformanceTest {
       assertEquals("application/json", response.headers().firstValue("Content-Type").orElse(null));
       assertArrayEquals(cached, response.body());
     }
+  }
+
+  /// The cached handler declares `application/json` before it asks for the bytes, so a cached
+  /// response that throws leaves that header on the response; the 500 must not carry it.
+  @Test
+  void aThrowingCachedResponseAnswers500WithoutItsContentType() throws Exception {
+    final int port = serve(builder -> builder.cachedQueryHandler("/cached", () -> {
+      throw new IllegalStateException("cache bug");
+    }));
+
+    assertBare500(rawGet(port, "/cached"));
+  }
+
+  /// A cached response's `Error` is answered like a handler's: a bare 500, logged at `ERROR`,
+  /// without the `application/json` declared before the cached response was asked for.
+  @Test
+  void anErrorInACachedResponseAnswers500() throws Throwable {
+    final int port = serve(builder -> builder.cachedQueryHandler("/cached", () -> {
+      throw new StackOverflowError("cache recursion");
+    }));
+
+    final var logs = recordLogs(JdkController.class.getName(), () -> assertBare500(rawGet(port, "/cached")));
+    assertHandlerFailureLogged(logs, StackOverflowError.class);
   }
 
   @Test
@@ -513,6 +655,21 @@ final class JdkConformanceTest {
     assertEquals("", rawBody(response), response);
   }
 
+  /// A failed handler's answer on the wire: `500` with no body, framed by the `Content-length: 0`
+  /// jdk.httpserver gives a bodyless `500` to any method but `HEAD` (see
+  /// [JdkController#answerWithoutBody]), and none of the headers the handler set before it
+  /// failed — no `Content-Type`, none of `handlerHeaders`. As in [#assertBodylessFraming], the
+  /// header pinned present is what makes the absences mean absence.
+  private static void assertBare500(final String response, final String... handlerHeaders) {
+    assertEquals(500, rawStatus(response), response);
+    assertEquals("0", rawHeader(response, "Content-Length"), response);
+    assertEquals("", rawBody(response), response);
+    assertNull(rawHeader(response, "Content-Type"), "the 500 must not carry the failed handler's content type: " + response);
+    for (final var name : handlerHeaders) {
+      assertNull(rawHeader(response, name), "the 500 must not carry the failed handler's " + name + ": " + response);
+    }
+  }
+
   @Test
   void ambiguousPathsAreRefused() throws Exception {
     final int port = serve(builder -> {
@@ -624,6 +781,33 @@ final class JdkConformanceTest {
     } finally {
       serverLogger.removeHandler(capture);
     }
+  }
+
+  /// A `1xx` is an interim answer that a final one must follow, so a handler that returns one
+  /// has failed like one that throws: the status written is the one
+  /// `HttpResponse.checkFinalStatus` returns, which refuses it before any header is set, and
+  /// the failure is answered a bare 500 and logged at `ERROR`. Before, jdk.httpserver wrote the
+  /// 103 head with the handler's headers and ended the exchange, the body write behind it failed
+  /// and was logged as a client leaving, and a keep-alive client was left waiting for a final
+  /// answer.
+  @Test
+  void anInterimStatusAnswers500() throws Throwable {
+    final int port = serve(builder ->
+        builder.blockingQueryHandler("/early", request ->
+            HttpResponse.response(103, "text/plain", Map.of("X-Handler", "early"), "hint".getBytes(StandardCharsets.UTF_8))));
+
+    final var logs = recordLogs(JdkController.class.getName(), () -> assertBare500(rawGet(port, "/early"), "X-Handler"));
+    assertHandlerFailureLogged(logs, IllegalStateException.class);
+  }
+
+  /// Nothing above `599` is a status, and jdk.httpserver wrote a 600, head and body, as given.
+  @Test
+  void aStatusAbove599Answers500() throws Exception {
+    final int port = serve(builder ->
+        builder.blockingQueryHandler("/beyond", request ->
+            HttpResponse.response(600, "text/plain", Map.of("X-Handler", "beyond"), "beyond".getBytes(StandardCharsets.UTF_8))));
+
+    assertBare500(rawGet(port, "/beyond"), "X-Handler");
   }
 
   @Test

@@ -2,6 +2,7 @@ package software.sava.http_servers.jdk;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
+import software.sava.http_servers.core.response.HttpResponse;
 import software.sava.http_servers.core.response.QueryHandler;
 
 import java.io.IOException;
@@ -25,9 +26,12 @@ final class JdkQueryHandler implements HttpHandler {
 
   @Override
   public void handle(final HttpExchange exchange) throws IOException {
-    // a RuntimeException propagates to JdkController's guard, which answers 500; a failed body
-    // read propagates as JdkRequest.BodyReadException, for which it closes the connection
+    // a RuntimeException or Error propagates to JdkController's guard, which answers 500; a
+    // failed body read propagates as JdkRequest.BodyReadException, for which it closes the
+    // connection
     final var httpResponse = queryHandler.httpResponse(new JdkRequest(exchange));
+    // a status that is not final throws here, before any header is set, and is answered 500
+    final int statusCode = HttpResponse.checkFinalStatus(httpResponse.statusCode());
 
     final var headers = exchange.getResponseHeaders();
     headers.set("Content-Type", httpResponse.contentType());
@@ -36,7 +40,6 @@ final class JdkQueryHandler implements HttpHandler {
     }
 
     final var body = httpResponse.body();
-    final int statusCode = httpResponse.statusCode();
     if (statusCode == 204 || statusCode == 304) {
       // bodyless statuses take contentLen -1; any other value makes the jdk server force
       // -1 itself and log a warning about the correction
