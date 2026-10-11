@@ -49,9 +49,15 @@ final class ResponseUtil {
     return response;
   }
 
-  /// `origin` is the request's `Origin` header, or null when it carried none.
+  /// A handler's response; `origin` is the request's `Origin` header, or null when it carried
+  /// none. The status written is the one [HttpResponse#checkFinalStatus] returns, so a status
+  /// that is not final throws `IllegalStateException` here, inside `NettyController.invoke`'s
+  /// guard, which answers it 500. Written as given, a `1xx` would go out as an interim head
+  /// with its body dropped by the encoder, and leave the request in flight: the gate completes
+  /// a request only on a non-informational response. The server's own responses
+  /// (`jsonResponse`, `emptyResponse`) carry statuses it chose and are not checked.
   static FullHttpResponse response(final HttpResponse httpResponse, final String origin) {
-    return response(httpResponse.statusCode(), httpResponse.contentType(), httpResponse.headers(), httpResponse.body(), origin);
+    return response(HttpResponse.checkFinalStatus(httpResponse.statusCode()), httpResponse.contentType(), httpResponse.headers(), httpResponse.body(), origin);
   }
 
   static FullHttpResponse jsonResponse(final int statusCode, final String json) {

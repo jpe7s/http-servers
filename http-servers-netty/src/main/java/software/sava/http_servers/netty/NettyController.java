@@ -44,12 +44,12 @@ import static java.lang.System.Logger.Level.ERROR;
 /// - A request the codec cannot parse arrives with a failed decoder result and is answered
 ///   400 (`"Malformed request."`) before the connection is closed — the other servers refuse
 ///   such requests in their own layer.
-/// - A `RuntimeException` from a handler is answered 500 on both the inline and the
-///   offloaded path and logged through [System.Logger]; an `Error` on the offloaded path
-///   escapes to the executor thread, as it does in the JDK adapter's executor task. An
-///   `Error` on the inline path reaches [#exceptionCaught] through the pipeline — Netty
-///   routes a throw from `channelRead` to the throwing handler's `exceptionCaught` whether the
-///   read was fired by the socket or by the gate's drain — which answers 500 and closes.
+/// - A `RuntimeException` from a handler, or from [ResponseUtil] for a handler's response
+///   whose status is not final, is answered 500 on both the inline and the offloaded path and
+///   logged through [System.Logger]. An `Error`, or a checked exception a handler threw
+///   without declaring it, is answered 500 too and the connection then closed. [#invoke]
+///   answers every handler failure itself, so none reaches [#exceptionCaught], where the
+///   client-departure rule could read a handler's own `Connection reset` as the peer leaving.
 /// - A connection that ends while a request body is still arriving — the client abandoned
 ///   an upload — reaches [#exceptionCaught] two ways: an orderly close (`FIN`) as Netty's
 ///   aggregator's `PrematureChannelClosureException`, a reset (`RST`) as the transport's own
@@ -166,7 +166,10 @@ final class NettyController extends SimpleChannelInboundHandler<FullHttpRequest>
     }
   }
 
-  /// Runs on the event loop for a non-blocking route and on the executor for a blocking one.
+  /// Runs on the event loop for a non-blocking route and on the executor for a blocking one,
+  /// and answers whatever the handler throws itself, on either path: an executor task has no
+  /// pipeline to route a throw to [#exceptionCaught], and [#clientLeft] there would read a
+  /// handler's own `Connection reset` as the peer leaving.
   private void invoke(final ChannelHandlerContext ctx, final NettyRequest request, final NettyHandler handler) {
     FullHttpResponse response;
     try {
@@ -175,6 +178,11 @@ final class NettyController extends SimpleChannelInboundHandler<FullHttpRequest>
       // an unanswered request would hang the client, and everything queued behind it
       logger.log(ERROR, "Failed to process request.", e);
       response = serverError();
+    } catch (final Throwable e) {
+      // an Error, or a checked exception the handler threw without declaring it: answered and
+      // then closed, as exceptionCaught answers a failure it cannot attribute
+      logger.log(ERROR, "Failed to process request.", e);
+      response = ResponseUtil.closeAfter(serverError());
     }
     ctx.writeAndFlush(response);
   }
@@ -185,9 +193,9 @@ final class NettyController extends SimpleChannelInboundHandler<FullHttpRequest>
   /// its own — the transport's own read fails, as `java.net.SocketException: Connection reset`
   /// on the NIO transport and as an [IOException] naming the failing syscall and the C-level
   /// `Connection reset by peer` on the native ones. The message is all either platform
-  /// offers, so it is what this matches, and only on an [IOException]: a handler's
-  /// `RuntimeException` is answered by [#invoke] and never arrives here, and an `Error` is
-  /// not an [IOException], so neither can be mistaken for a client leaving. This server
+  /// offers, so it is what this matches, and only on an [IOException]. Nothing a handler
+  /// throws arrives here, whatever its type or message: [#invoke] answers it on either path,
+  /// so a handler's failure cannot be mistaken for a client leaving. This server
   /// builds the NIO transport only ([NettyHttpServer] bootstraps `NioServerSocketChannel`),
   /// so the native shape is guarded against a future transport switch, not observed here.
   /// The reset is also the only peer-gone shape this matches by design: a read failure the
@@ -214,8 +222,8 @@ final class NettyController extends SimpleChannelInboundHandler<FullHttpRequest>
       ctx.close();
       return;
     }
-    // the failing request is unknown here — an Error past invoke's guard, or the transport —
-    // so answer on the channel and end it; a dead socket fails the write harmlessly
+    // the failing request is unknown here — a throw from elsewhere in the pipeline, or the
+    // transport — so answer on the channel and end it; a dead socket fails the write harmlessly
     logger.log(ERROR, "Failed to process request.", cause);
     ctx.writeAndFlush(ResponseUtil.closeAfter(serverError()));
   }

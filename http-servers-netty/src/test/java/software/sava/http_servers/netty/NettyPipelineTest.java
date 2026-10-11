@@ -529,7 +529,8 @@ final class NettyPipelineTest {
   /// The other direction of the same rule, over the three ways a failure can come close to
   /// the client-abort shape without being one: an `IOException` that names another transport
   /// fault, an `IOException` with no message at all, and a throwable that says the words but
-  /// is not an `IOException` — a handler's own `Error` carrying text this server never wrote.
+  /// is not an `IOException` — an `Error` carrying text this server never wrote. A handler's
+  /// own failures never get here (`invoke` answers them); these are fired through the pipeline.
   /// Only the transport can report a peer leaving, so all three keep the unchanged contract —
   /// `500`, `Connection: close`, an `ERROR` record — and the classification cannot be widened
   /// into swallowing a genuine failure of this server, which would leave the client unanswered.

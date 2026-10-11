@@ -22,9 +22,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Pins the parts of the core Request/HttpResponse contract that every backend must agree
-/// on: the raw query string, 500 on a throwing handler (never a hang or connection abort),
-/// custom status/header propagation (the x402 payment-gate shape), cached JSON responses,
-/// and case-insensitive request-header lookup.
+/// on: the raw query string, 500 on a throwing handler or a non-final status (never a hang or
+/// connection abort), custom status/header propagation (the x402 payment-gate shape), cached
+/// JSON responses, and case-insensitive request-header lookup.
 ///
 /// The cases above the "what this backend adds" divider pin that shared contract; those after
 /// it pin what this backend adds — per-connection response ordering under pipelining,
@@ -195,6 +195,35 @@ final class NettyConformanceTest {
     });
     assertTrue(logs.stream().anyMatch(r -> r.getThrown() instanceof IllegalStateException),
         "the handler failure must be logged, not swallowed");
+  }
+
+  /// A handler that returns a non-final status has failed like one that throws: written as
+  /// given, a `103` is an interim head (Netty's encoder drops its body) that never completes
+  /// the request, so the client waits for a final response that never comes. The status
+  /// written is the one `HttpResponse.checkFinalStatus` returns, so the `103` is answered
+  /// with the controller's JSON 500 and logged. Read raw, so nothing interim may precede the
+  /// 500 (`HttpClient` skips a `103`), and the requested close proves the 500 was final.
+  @Test
+  void nonFinalStatusAnswers500() throws Throwable {
+    final int port = serve(builder ->
+        builder.blockingQueryHandler("/early", request ->
+            HttpResponse.response(103, "text/plain", "early".getBytes(StandardCharsets.UTF_8))));
+
+    final var logs = recordLogs(NettyController.class.getName(), () -> {
+      try (final var socket = new java.net.Socket("127.0.0.1", port)) {
+        socket.setSoTimeout(2_000);
+        socket.getOutputStream().write("GET /early HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+            .getBytes(StandardCharsets.US_ASCII));
+        final var in = socket.getInputStream();
+        final var response = readResponse(in);
+        assertEquals(500, rawStatus(response), response);
+        assertEquals("application/json", rawHeader(response, "Content-Type"), response);
+        assertTrue(rawBody(response).contains("msg"), response);
+        assertClosed(in);
+      }
+    });
+    assertTrue(logs.stream().anyMatch(r -> r.getThrown() instanceof IllegalStateException),
+        "the refused status must be logged, not swallowed");
   }
 
   @Test
@@ -1113,12 +1142,11 @@ final class NettyConformanceTest {
     }
   }
 
-  /// An `Error` thrown by a non-blocking handler passes the dispatch guard (which answers
-  /// `RuntimeException` only, like the JDK adapter) and reaches the pipeline, where Netty's
-  /// default is to log it and leave the connection open — the client would hang. The
-  /// controller's `exceptionCaught` must answer 500, log it, and close. Read raw so the
-  /// close is asserted (the JSON body and `close` are half `exceptionCaught`'s contract and
-  /// no mutator pins the `false` literal on the write) rather than left to the client bound.
+  /// An `Error` thrown by a non-blocking handler gets past the guard that answers an ordinary
+  /// `RuntimeException`, and left to the pipeline, Netty's default is to log it and leave the
+  /// connection open — the client would hang. `invoke` answers it itself: 500 with the JSON
+  /// body, logged, and the connection closed. Read raw so the close is asserted rather than
+  /// left to the client bound.
   @Test
   void errorEscapingANonBlockingHandlerIsAnsweredAndLogged() throws Throwable {
     final int port = serve(builder ->
@@ -1143,13 +1171,13 @@ final class NettyConformanceTest {
         "the escaped failure must be logged, not swallowed");
   }
 
-  /// The queued sibling of the case above: an `Error` from a handler dispatched off the
-  /// *write-completion listener* (the second request of a pipelined pair, drained from the
-  /// queue when the first completes) does not reach `exceptionCaught` on its own — Netty's
-  /// promise notifier logs and swallows a listener throw (`DefaultPromise.notifyListener0`),
-  /// which would leave the client unanswered and the connection stuck in flight. The
-  /// controller guards the listener body and routes the throw to `exceptionCaught`, so the
-  /// second request is answered 500 and the connection closed. Modelled on
+  /// The queued sibling of the case above: an `Error` from a handler whose request was not read
+  /// from the socket but forwarded by the gate's *write-completion listener* (the second
+  /// request of a pipelined pair, drained from the queue when the first completes). Escaping
+  /// into that listener, the throw would be logged and swallowed by Netty's promise notifier
+  /// (`DefaultPromise.notifyListener0`), leaving the client unanswered and the connection stuck
+  /// in flight. It never escapes: `invoke` answers it where it is thrown, so the second
+  /// request is answered 500 and the connection closed. Modelled on
   /// `pipelinedResponsesArriveInRequestOrder`: one I/O thread and a probe on a second
   /// connection ensure the loop has queued the second request before the first is released.
   @Test
@@ -1195,6 +1223,78 @@ final class NettyConformanceTest {
     });
     assertTrue(logs.stream().anyMatch(r -> r.getThrown() instanceof AssertionError),
         "the escaped failure must be logged, not swallowed");
+  }
+
+  /// The offloaded sibling of `errorEscapingANonBlockingHandlerIsAnsweredAndLogged`: an
+  /// `Error` from a blocking route is thrown on the executor thread, where no pipeline call
+  /// could route it to `exceptionCaught`, so left unanswered the gate would hold the request in
+  /// flight for good. `invoke` answers it on that thread: 500 with the JSON body, logged, and
+  /// closed, exactly as on the inline path. Read raw so the close is asserted, as in the
+  /// inline case.
+  @Test
+  void errorEscapingABlockingHandlerIsAnsweredAndLogged() throws Throwable {
+    final int port = serve(builder ->
+        builder.blockingQueryHandler("/boom-error", request -> {
+          throw new AssertionError("handler bug");
+        }));
+
+    final var logs = recordLogs(NettyController.class.getName(), () -> {
+      try (final var socket = new java.net.Socket("127.0.0.1", port)) {
+        socket.setSoTimeout(2_000);
+        socket.getOutputStream().write("GET /boom-error HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+            .getBytes(StandardCharsets.US_ASCII));
+        final var in = socket.getInputStream();
+        final var response = readResponse(in);
+        assertEquals(500, rawStatus(response), response);
+        assertEquals("application/json", rawHeader(response, "Content-Type"), response);
+        assertTrue(rawBody(response).contains("msg"), response);
+        assertClosed(in);
+      }
+    });
+    assertTrue(logs.stream().anyMatch(r -> r.getThrown() instanceof AssertionError),
+        "the escaped failure must be logged, not swallowed");
+  }
+
+  /// A handler's failure is never taken for the client leaving, whatever its message: a handler
+  /// that throws, undeclared, the `SocketException` an upstream reset raises reads exactly like
+  /// the transport's own `Connection reset`, which `exceptionCaught` closes at `DEBUG` with
+  /// nothing written. On both paths it must be answered 500 and closed like an `Error`, and
+  /// logged at `ERROR`.
+  @Test
+  void aHandlersOwnConnectionResetIsAnsweredAndLogged() throws Throwable {
+    final int port = serve(builder -> {
+      builder.blockingQueryHandler("/blocking-reset", request -> {
+        throw sneaky(new java.net.SocketException("Connection reset"));
+      });
+      builder.nonBlockingQueryHandler("/inline-reset", request -> {
+        throw sneaky(new java.net.SocketException("Connection reset"));
+      });
+    });
+
+    for (final var target : new String[]{"/blocking-reset", "/inline-reset"}) {
+      final var logs = recordLogs(NettyController.class.getName(), () -> {
+        try (final var socket = new java.net.Socket("127.0.0.1", port)) {
+          socket.setSoTimeout(2_000);
+          socket.getOutputStream().write(("GET " + target + " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+              .getBytes(StandardCharsets.US_ASCII));
+          final var in = socket.getInputStream();
+          final var response = readResponse(in);
+          assertEquals(500, rawStatus(response), target + " -> " + response);
+          assertEquals("application/json", rawHeader(response, "Content-Type"), target + " -> " + response);
+          assertClosed(in);
+        }
+      });
+      assertTrue(logs.stream().anyMatch(r -> r.getLevel() == java.util.logging.Level.SEVERE
+              && r.getThrown() instanceof java.net.SocketException),
+          target + ": the handler's failure must be logged at ERROR");
+    }
+  }
+
+  /// Throws `failure` from a lambda whose interface declares no checked exception, as a Kotlin
+  /// handler or a sneaky throw would.
+  @SuppressWarnings("unchecked")
+  private static <T extends Throwable> RuntimeException sneaky(final Throwable failure) throws T {
+    throw (T) failure;
   }
 
   /// The pre-flight answer has no body, and on a persistent HTTP/1.1 connection a response
