@@ -122,12 +122,15 @@ edges the ratchet cannot see.
   probe-and-branch (core's `findFirst`,
   `BaseHttpServerBuilderTests.FixtureFactory`) — assertions may branch on a
   `ServiceLoader` probe, pass/fail may not depend on the world.
-- **The Jetty compliance backstop is the one socket-unreachable family.**
-  Jetty's `UriCompliance.DEFAULT` answers the ambiguous-path battery before
-  `JettyController` runs (measured 2026-07-24 on Jetty 12.1). The named
-  missing capability is an in-process controller harness with faked
-  `Request`/`Response`/`Callback`; re-measure the claim on every Jetty
-  major/minor bump. See the jetty README's per-row reasons.
+- **"Socket-unreachable" needs every target form tried.** Jetty's
+  `UriCompliance.DEFAULT` answers the ambiguous-path battery before
+  `JettyController` runs, so the controller's own 400 branch was accepted as
+  unreachable over a socket (the `# compliance backstop` rows, 2026-07-24).
+  It was not: Jetty exempts `OPTIONS`, `PRI` and `CONNECT` from its
+  rooted-path check, `OPTIONS *` passes, and the shared routing refuses `*`,
+  so the branch is pinned over a socket and the rows were pruned (2026-10-11).
+  Before accepting a branch as unreachable, try the request-target forms the
+  server treats specially (asterisk, authority, absolute).
 - **The jdk server layer's verdicts are JDK-build-dependent.** jdk.httpserver
   answers `//echo` 404 on some builds and 400 on others; conformance tests pin
   refused-and-never-routed, never the exact status. CI runs a different JDK

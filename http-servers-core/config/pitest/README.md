@@ -38,16 +38,16 @@ coincide when `to == from` (an empty value either way), so `<` → `<=` cannot
 change any result. Triaged 2026-07-17 (in `parseParam` before value decoding
 was added 2026-07-22 and structure extraction moved to `parseRawParam`).
 
-The 2026-07-24 canonical-routing contract grew the suite to 160 mutants
-(`PathCanonicalizer`, the `HandlerLookup.badRequest()` state and the
-canonicalize-first `HandlerMapImpl` lookup, killed by
-`PathCanonicalizerTests`, the `HandlerMapTests` canonical/ambiguous cases
-and the generated `PathCanonicalizerFuzzSeedReplayTest`); a redundant
-empty-segments early return was refactored out rather than accepted during
-that pass. The suite carries 3 `TIMED_OUT` mutants (infinite-loop
-conversions in the query and path scans). They count as detected and were
-observed `TIMED_OUT` across runs — not unioned into the baseline; if one
-flips to `SURVIVED`, verify the flip in both modes before adding it.
+The 2026-07-24 canonical-routing contract added `PathCanonicalizer`, the
+`HandlerLookup.badRequest()` state and the canonicalize-first `HandlerMapImpl`
+lookup to the suite, killed by `PathCanonicalizerTests`, the `HandlerMapTests`
+canonical/ambiguous cases and the generated
+`PathCanonicalizerFuzzSeedReplayTest`; a redundant empty-segments early
+return was refactored out rather than accepted during that pass. The suite's
+`TIMED_OUT` mutants, infinite-loop conversions in the query and path scans,
+count as detected and were observed `TIMED_OUT` across runs — not unioned into
+the baseline; if one flips to `SURVIVED`, verify the flip in both modes before
+adding it.
 
 ### Audited timeouts (`handlers-timeouts.csv`)
 
@@ -82,28 +82,28 @@ fails, or needs re-anchoring.
 
 ## wiring suite — no accepted mutants
 
-`wiring-accepted.csv` is empty and the suite runs at 100% (78 mutants).
+There is no `wiring-accepted.csv`: every mutant in the suite is killed.
 Keep it that way: any new survivor here is a real gap, not debt.
 
 ## response suite — no accepted mutants
 
-`response-accepted.csv` is empty and the suite runs at 100% (9 mutants).
+There is no `response-accepted.csv`: every mutant in the suite is killed.
 Keep it that way.
 
 The suite also targets `core.request.*` (2026-08-03). That package holds only
-the all-abstract `Request` interface, so it adds no mutants and does not move
-the count above — but the ownership audit counts it as production code, and
-this package's `QueryHandler` (`Request -> HttpResponse`) is its only
-production consumer. It is targeted rather than declined so a default method
-added to `Request` later is mutated by default; `targetTests` deliberately
-stays `core.response.*Test*`, so that first default method is owed a test in
-this suite's test scope rather than a silent widening.
+the all-abstract `Request` interface, so it adds no mutants — but the
+ownership audit counts it as production code, and this package's
+`QueryHandler` (`Request -> HttpResponse`) is its only production consumer. It
+is targeted rather than declined so a default method added to `Request` later
+is mutated by default; `targetTests` deliberately stays
+`core.response.*Test*`, so that first default method is owed a test in this
+suite's test scope rather than a silent widening.
 
 ## server suite — no accepted mutants
 
-`server-accepted.csv` was retired 2026-08-02 and the suite runs at 100%
-(40 mutants; 39 until the `HttpServer.close()` default landed 2026-08-07, killed by
-`closeStopsTheServerAndStartsNothing`). Keep it that way.
+`server-accepted.csv` was retired 2026-08-02 and every mutant in the suite is
+killed, the `HttpServer.close()` default (2026-08-07) by
+`closeStopsTheServerAndStartsNothing`. Keep it that way.
 
 The registration-breadcrumb `VoidMethodCallMutator`s (`addQueryHandler`,
 `addPathHandler`) were killed 2026-07-22 by
@@ -148,9 +148,8 @@ seeding rather than accepted. The remainder:
   lands in its `default -> v.toString()` arm — the same result the
   fast path returns.
 
-The suite also carries 2 `TIMED_OUT` mutants (loop mutations in
-`formatPlaceholders`), observed detected in both solo and gate runs — not
-unioned into the baseline.
+The suite's `TIMED_OUT` mutants, loop mutations in `formatPlaceholders`, were
+observed detected in both solo and gate runs — not unioned into the baseline.
 
 ### Audited timeouts (`logging-timeouts.csv`)
 

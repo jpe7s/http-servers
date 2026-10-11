@@ -6,34 +6,38 @@ and **fails on anything new**. Full policy lives in sava-build's `HARDENING.md`.
 
 ## dispatch suite — seeded 2026-07-22
 
-The 2026-07-24 canonical-routing contract added the compliance-backstop
-family below (the only `NO_COVERAGE` rows in the suite).
+The suite has no `NO_COVERAGE` rows. The three it had, with a fourth,
+`SURVIVED` row on the same branch, formed the `# compliance backstop` family the
+2026-07-24 canonical-routing contract added; the family was retired on
+2026-10-11 once `OPTIONS *` was shown to reach its branch over a socket (see
+"Killed by pinning rather than accepted").
 
 Covering tests are real socket round trips (`JettyConformanceTest`,
-`JettyPostHandlerTest`). The suite carries `TIMED_OUT` mutants
-(socket-wait conversions, audited in `dispatch-timeouts.csv` — causes at the
-end of this file), and the handled-flag family below **flaps between
-`SURVIVED` and detected across runs** — the baseline holds the union of
-observed states, so quiet runs report stale entries rather than failing;
-that is expected and safe.
+`JettyPostHandlerTest`), every request and read bounded at 2 s (see "Fixture
+bound" under the audited timeouts), so a dropped write fails its test instead of
+timing out. The handled-flag family below **flaps between `SURVIVED` and
+detected across runs** — the baseline holds the union of observed states, so
+quiet runs report stale entries rather than failing; that is expected and safe.
 
 Measured 2026-07-24 (`pitestModeSnapshot` solo + gate, `pitestModeCompare`):
-two rows flipped across modes, both already insured — `JettyQueryHandler` 43
-(gate=KILLED, solo=SURVIVED) and `JettyServerBuilder` 53 (same directions;
-the "explicit documentation" acceptance is also load-flappy). Zero uninsured
-flips anywhere in the repo.
+two rows flipped across modes, both already insured —
+`JettyQueryHandler.handle`'s return (gate=KILLED, solo=SURVIVED) and the
+`setSendXPoweredBy(false)` call in `JettyServerBuilder.initRestServer` (same
+directions; the "explicit documentation" acceptance is also load-flappy). Zero
+uninsured flips anywhere in the repo.
 
-**Cycle 2, 2026-07-24 (pre-release check):** a *third* row flipped —
-`JettyController` 96 (`BooleanFalseReturnVals`), gate=KILLED / solo=SURVIVED,
-already insured by its membership in the union; `pitestModeCompare` reported
-0 uninsured flips, 0 unioned now, 1 already insured. It now carries the same
-`(flip insurance: …)` parenthetical as rows 43 and 29. Which member of the
-handled-flag family flips is itself load-dependent — do not read a quiet run
-on one row as the family settling. **The 3-quiet-cycle counter is therefore
-still at 0**: no cycle has yet observed the family detected in both modes.
-The `1 stale entries` notice a gate run prints is this flip, not rot — the
-row survives in solo mode, so pruning it makes the next solo run fail the
-ratchet with an unexplained `SURVIVED`.
+**Cycle 2, 2026-07-24 (pre-release check):** a *third* row flipped — the
+routed return in `JettyController.handle` (`BooleanFalseReturnVals`),
+gate=KILLED / solo=SURVIVED, already insured by its membership in the union;
+`pitestModeCompare` reported 0 uninsured flips, 0 unioned now, 1 already
+insured. It now carries the same `(flip insurance: …)` parenthetical as the
+other two. Which member of the handled-flag family flips is itself
+load-dependent — do not read a quiet run on one row as the family settling.
+**The 3-quiet-cycle counter is therefore still at 0**: no cycle has yet
+observed the family detected in both modes. The `1 stale entries` notice a
+gate run prints is this flip, not rot — the row survives in solo mode, so
+pruning it makes the next solo run fail the ratchet with an unexplained
+`SURVIVED`.
 
 **Removal criterion for the union rows** (per HARDENING.md, written when the
 union is written): drop a union row only when its cause is removed — handlers
@@ -60,9 +64,7 @@ the `callback.succeeded()` completing the pre-flight are killed.
 it added nothing over `Handler.Abstract`, whose own `(InvocationType)`
 constructor the two remaining handlers now call directly. Its one surviving
 member, the `JSON_CONTENT` header field, moved to `JettyController` — the
-class that writes it on the 404 and 405 paths. This shifted
-`JettyCachedJsonResponseHandler.handle`'s accepted row from line 27 to 28; the
-mutant, its reason, and the 14-key population are otherwise unchanged.
+class that writes it on the 404 and 405 paths.
 
 Killed by pinning rather than accepted: the pre-flight detection conditions
 (`preflightHeadersOnNonOptionsRequestsAreIgnored`,
@@ -71,7 +73,11 @@ Killed by pinning rather than accepted: the pre-flight detection conditions
 (`identifyingServerHeadersAreSuppressed`), and `setVirtualThreadsExecutor`
 (`blockingHandlersRunOnTheProvidedExecutor` — jetty 12 dispatches blocking
 work on the provided executor deterministically; killed via a recording
-executor 2026-07-22).
+executor 2026-07-22). Since 2026-10-11 also the ambiguous-path 400 branch
+(`asteriskFormIsAnsweredWithTheAmbiguousPath400`: `OPTIONS *` passes Jetty's
+`UriCompliance` and the shared routing refuses it — the socket route the
+retired `# compliance backstop` acceptance said did not exist) and the routed
+return's `true` direction (`aRoutedHandlerThatDeclinesIsAnsweredWithJettys404`).
 
 - **`# handled-flag family`**: mutants on the boolean a `Handler.handle`
   returns. The members are these `JettyController.handle` returns: the `return
@@ -94,57 +100,22 @@ executor 2026-07-22).
   catch's `return true` was already a member while the catch failed the
   callback. Since the catch writes the JSON 500 itself (2026-10-10), it races
   like the rest. It was killed in that day's solo history-free run and survived
-  under certification the same evening. In that run it was matched by the row
-  whose `# line` tag still names the old catch, so the line-drift advisory at
-  this key names the catch's current line. That reading is this member, not a
-  swap. Its tag lags until a run that sees it survive is retagged.
-- The former wildcard-bind family (`initRestServer` 34 both skip-directions,
-  35 `setHost` removal) was killed 2026-07-24 by `startOnAnOccupiedPortThrows`:
-  the occupied `localhost` address makes a wildcard bind dodge the conflict
-  and skip the expected throw — the second observer the acceptance said
-  required another network interface.
-- `# blank-ACRM funnel` — `JettyController` 36 (`EQUAL_IF`): treating a blank
-  `Access-Control-Request-Method` as a pre-flight looks up method `" "`, which
-  no handler map contains — the same 405 + Allow the non-pre-flight path
-  returns. `JettyConformanceTest` has no blank-method case; the rule is pinned
-  only by `blankRequestMethodHeaderIsNotAPreflight` in the Helidon and Netty
-  suites, against their own controllers.
-- `# null-origin no-op` — `JettyController` 70 (`EQUAL_IF` on `origin != null`): forcing the branch
-  with a null origin makes `put(ACCESS_CONTROL_ALLOW_ORIGIN, null)` — a
-  header *remove*, i.e. a no-op. The divergent sub-case (a pre-flight
-  without an Origin header) has no well-defined semantics to pin.
-- `# error funnel` — no longer holds. The catch in `JettyController.handle`
-  used to fail the callback, which made its `setStatus(500)` redundant; since
-  2026-10-10 it writes the controller's own JSON 500, and removing that
-  `setStatus(500)` answers 200 and is killed (fresh history-free run,
-  2026-10-10). The row matches nothing, but prune and update keep it while
-  its key carries audited `TIMED_OUT` copies (the same-key timeout budget).
-  A surviving `VoidMethodCallMutator` in `handle` would therefore still pass,
-  flagged only by the line-drift advisory against this row's stale `# line`
-  tag: at this key that advisory means a new survivor, not a moved line, and
-  Retag would erase it.
-- **`# compliance backstop`** family (4 rows): the shared `HandlerMap`
-  refuses ambiguous paths (encoded separators, encoded dot segments,
-  double-encoding, empty segments — see core's `PathCanonicalizer`), but
-  Jetty's own `UriCompliance.DEFAULT` rejects every such target before this
-  handler runs — measured 2026-07-24 on Jetty 12.1: the whole ambiguous
-  conformance battery, literal backslash included, answers 400 from Jetty's
-  layer. Per row: `JettyController` 52 (`EQUAL_ELSE`, `SURVIVED`) skips the
-  `badRequest()` check — covered, but no socket request can arrive with an
-  ambiguous canonical form, so both branch directions answer identically;
-  56–58 (`NO_COVERAGE`) are the 400-writing statements of the branch no
-  request enters. The branch is defense in depth for a future Jetty default
-  change. **Missing capability** (the named escape for all four rows, and an
-  acceptance with an expiry date): constructing a Jetty core `Request` whose
-  `HttpURI` carries an ambiguous target without a socket — an in-process
-  controller harness with faked `Request`/`Response`/`Callback` (the
-  `generateTestSupport` adoption trigger in AGENTS.md). Re-measure the
-  UriCompliance claim on every Jetty major/minor bump — the 400-from-Jetty
-  measurement is what keeps these four equivalent. The jdk, helidon and netty
-  twins of this branch are live and killed by `ambiguousPathsAreRefused`.
-- `# explicit-default doc` — `JettyServerBuilder` 53 (`setSendXPoweredBy(false)`
-  removal): the flag's
-  default is already false; the call is explicit documentation. (Its
+  under certification the same evening.
+- The former wildcard-bind family (the host guard in `initRestServer` skipped in
+  both directions, and the `setHost` removal) was killed 2026-07-24 by
+  `startOnAnOccupiedPortThrows`: the occupied `localhost` address makes a
+  wildcard bind dodge the conflict and skip the expected throw — the second
+  observer the acceptance said required another network interface. PIT now
+  credits the guard's kill to `theConnectorBindsTheRequestedHost` (added
+  2026-08-07), which reads the requested host off the unstarted connector.
+- `# null-origin no-op` — `JettyController.handle`'s `origin != null` check
+  (`EQUAL_IF`): forcing the branch with a null origin makes
+  `put(ACCESS_CONTROL_ALLOW_ORIGIN, null)` — a header *remove*, i.e. a no-op.
+  The divergent sub-case (a pre-flight without an Origin header) has no
+  well-defined semantics to pin.
+- `# explicit-default doc` — the `setSendXPoweredBy(false)` call in
+  `JettyServerBuilder.initRestServer` (its removal): the flag's default is
+  already false; the call is explicit documentation. (Its
   `setSendServerVersion` sibling defaults *on* and is killed.)
 
 **Thread-pool budget (2026-09-15).** `initRestServer` sized its pool to one platform
@@ -160,137 +131,32 @@ with four or more processors — by `aServerStartsAndAnswersWhenJettyCountsOneTo
 which lowers Jetty's `ProcessorUtils` count in-process. The builder sizes from that same
 count, so this is the only route by which PIT can see a small host. The real small-host JVMs
 (`smallHostTest1..3`, `-XX:ActiveProcessorCount=1..3`) run under `check`, outside PIT's
-reach: a forked JVM never loads a mutant. Measured history-free 2026-09-15: 79 generated,
-65 detected, 11 survived and 3 no-coverage all within accepted rows, 6 `TIMED_OUT` in
-audited keys.
+reach: a forked JVM never loads a mutant.
 
 ## Audited timeouts (`dispatch-timeouts.csv`)
 
-Four of the five members are one structural cause: a removed call that leaves
-the Jetty `Callback` never completed, so the response is never flushed and the
-socket client waits until PIT's watchdog ends the run. The fifth (the host
-guard in `initRestServer`) is a bind-path cause argued separately below.
-Detection here is the clock, not an assertion — weaken these tests and the
-timeouts still read as "detected", which is why membership is audited rather
-than counted. The eight rows collapse to five line-less members, all recorded
-`cause:liveness` — but see the standing 21.5.25 exception on the
-`initRestServer` host guard below. Membership and cause are key-level, so the
-`cause:liveness` token claims every sibling under each key; none of the five is
-a mixed key, which would need two siblings *timing out* for different
-structural reasons rather than merely a killed sibling sharing a key. A proven
-mixture would be repaired by splitting the identity into distinct method keys,
-never by annotating a line. The line values below are diagnostic pointers only
-— moving the write paths never warns, fails, or requires re-anchoring.
+The set is empty and armed, so a `TIMED_OUT` mutant in this suite is a
+reviewer-stop. Its five members were removed by hand on 2026-10-11, after the
+plugin's quiet notice had named all five quiet for three fresh history-free
+runs on identical inputs, one under gate load and two solo. Four were one
+structural cause, a removed call that leaves Jetty's `Callback` uncompleted,
+so the response is never flushed and the client waits on a read:
+`JettyController.handle`, `JettyErrorHandler.generateResponse`,
+`JettyQueryHandler.handle` and `JettyCachedJsonResponseHandler.handle`. The
+fifth was the `initRestServer` host guard, quiet since 2026-08-07 and killed
+by `theConnectorBindsTheRequestedHost`, which reads the requested host
+straight off the connector.
 
-**Fixture bound (recorded per the 21.5.25 rule).** `JettyConformanceTest`'s
-requests carry `HttpRequest.timeout(Duration.ofSeconds(10))`. It is not the
-claimed oracle for any row here — the argument is PIT's watchdog — and it
-cannot fire first, since PIT's per-mutant margin is the recorded duration ×
-1.25 + 4000 ms. A bound that cannot fail first contributes no cause evidence
-either way; it is recorded so it need not be rediscovered. Note that
-`startOnAnOccupiedPortThrows`, the covering test for `initRestServer` 34, uses
-no HTTP client at all and therefore has no fixture bound whatsoever.
-
-- `JettyController.handle` (`VoidMethodCallMutator`) — removing the
-  `Content.Sink.write` that emits the 404, 405 or 500 JSON body (the write
-  completes the callback; without it the status is set and nothing is ever
-  sent), or the `callback.succeeded()` that terminates a pre-flight answer.
-  The ambiguous-path 400's write is *not* here: it is `NO_COVERAGE`,
-  socket-unreachable behind Jetty's `UriCompliance` — see the
-  `# compliance backstop` family above.
-- `JettyErrorHandler.generateResponse` (`VoidMethodCallMutator`) — removing
-  the `super` call: the page for an error Jetty answers itself is never
-  written and its callback never completes. Covered by
-  `jettyErrorPageCarriesNoFailureDetail`, whose refused write is that error.
-- `JettyQueryHandler.handle` 42 (`VoidMethodCallMutator`) — `response.write`
-  removed: status and headers are set, the body never leaves, the callback
-  never completes.
-- `JettyServerBuilder.initRestServer` 34 (`RemoveConditionalMutator_EQUAL_ELSE`)
-  — **not the un-completed-callback cause above.** The guard is
-  `if (host != null && !host.isBlank())`; skipping it drops
-  `serverConnector.setHost(host)`, so the connector binds the wildcard instead
-  of the requested `localhost`. `startOnAnOccupiedPortThrows` occupies
-  `localhost:P` and asserts the bind fails, but a wildcard bind dodges that
-  conflict, so `start()` succeeds where the test expects a throw — and the
-  test holds no reference to the server it never expected to exist, so that
-  live acceptor is leaked into the mutation run. Solo the assertion still
-  reports first and the mutant reads `KILLED` (verified scoped 2026-08-04,
-  16/16); under certification parallelism the leaked acceptor outlives the
-  watchdog and it reads `TIMED_OUT`. Admitted 2026-08-04. Killing it in both
-  modes means stopping any unexpectedly-started server in that test — the
-  named missing capability here, and strictly better than this acceptance.
-
-  **Standing exception under sava-build 21.5.25 (recorded 2026-08-07): this
-  row's `cause:liveness` no longer holds.** The new doctrine falsifies the
-  admission on two independent grounds. First, the covering path is
-  *demonstrated* finite — the 16/16 solo `KILLED` reading above is exactly the
-  "demonstrated finite covering-path/watchdog race" the new `cause:harness`
-  category names, and such a race "is benign only to baseline arithmetic, never
-  certifying evidence"; the prescribed remedy is to repair or retime the
-  covering path, not to admit it and not to wait on the liveness-retirement
-  rule. Second, liveness may not be admitted while a synchronous state reader
-  can expose the defect without waiting, and one plainly can: the mutant's
-  whole effect is that the connector binds the wildcard instead of the
-  requested host, which the started server's own connector reports
-  synchronously — no clock, no socket, no watchdog. The leak itself is the
-  contaminated-evidence shape in HARDENING.md's "When a mutant won't die": a
-  thread whose cleanup an assertion failure skipped, diagnosable with
-  `-PmutateOnly=…:JettyServerBuilder -PnoMutationHistory` against
-  `-PmutateOnly=…:JettyServerBuilder -PisolateMutants`.
-
-  **Fresh 2026-08-07 measurement under 21.5.25, solo and history-free**
-  (`-PmutateOnly=…JettyServerBuilder -PnoMutationHistory`): 16 mutants, 15
-  killed, **`initRestServer` 34 reads `KILLED`**, and the scope carries zero
-  `TIMED_OUT`. The only survivor is line 29, the accepted `# explicit-default
-  doc` row. Repeating the same scope with `-PisolateMutants` gives an identical
-  result — 15/16, same survivor, zero `TIMED_OUT` — so there is **no
-  isolation-only kill and no contaminated evidence** in this scope today: the
-  leaked acceptor is real but is not currently changing any verdict. That
-  retires the stale 2026-08-04 16/16 as the standing solo evidence and replaces
-  it with a measurement taken on the current toolchain.
-
-  **The gate half agrees.** The full twelve-suite `hardeningCertify` of
-  2026-08-07 (fresh, history-free, `gitTree d87c754a`) read **both line-34
-  siblings `KILLED`**. The suite's six `TIMED_OUT` mutants that run are all in
-  the other three audited keys — `JettyController.handle` 66/75/92/101,
-  `JettyQueryHandler.handle` 42, `JettyCachedJsonResponseHandler.handle` 26.
-  So across solo, isolated and gate load on the current toolchain the finite
-  race does not reproduce, and this member is quiet.
-
-  **It is not retired yet, and the reason is mechanical rather than a judgment
-  call.** The same certification printed `timeout-retirement stash predates
-  fresh-only evidence bound to current inputs — the quiet-run counter resets
-  this run` for every suite carrying a timeouts file: 21.5.25 binds quiet-run
-  evidence to the input hashes, the plugin SHA is one of them, and the
-  21.5.24 → 21.5.25 bump therefore reset every counter to zero. The retirement
-  bar is three or more quiet notices over *identical* inputs, so this member
-  stands at one. Two further clean certifications on unchanged inputs retire it.
-
-  `theConnectorBindsTheRequestedHost` was added 2026-08-07 as the synchronous
-  state reader the doctrine asks you to look for: it reads the requested host
-  straight off the unstarted connector, with no socket, no watchdog and nothing
-  leaked. Measured honestly, **it does not change the kill attribution** — PIT
-  stops at the first killing test and still credits
-  `startOnAnOccupiedPortThrows` with both line-34 siblings. Its value is that
-  the property now has an oracle that cannot time out.
-
-  **The leak is fixed at its source (2026-08-07).** It was never a sloppy test:
-  `HttpServer` exposed only `start()`, so no caller — test or consumer — could
-  reclaim a started server. That gap is now closed. `HttpServer` gained
-  `stop()` and extends `AutoCloseable`, `JettyHttpServer.stop()` delegates to
-  Jetty's `Server.stop()` (which tolerates the FAILED state a bind conflict
-  leaves), and `startOnAnOccupiedPortThrows` now stops the server in a
-  `finally`. The wildcard acceptor a host-guard mutant starts is reclaimed
-  immediately, so the contamination this row was arguing about cannot recur.
-
-  The suite population therefore moves 72 → 73, the newcomer being
-  `JettyHttpServer.stop`'s `VoidMethodCallMutator`, killed by
-  `aStoppedServerRefusesConnections` — which starts a server, asserts it
-  answers, closes it via try-with-resources and asserts the port then refuses.
-  No accepted row was added, refreshed or re-argued.
-
-- `JettyCachedJsonResponseHandler.handle` 26 (`VoidMethodCallMutator`) — the
-  same shape on the cached-JSON path.
+**Fixture bound: 2 s, and why it is not 10 s.** Every `HttpClient` request and
+raw socket read in `JettyConformanceTest`, `JettyPostHandlerTest` and
+`JettyThreadBudgetTest` is bounded at 2 s. PIT's per-mutant watchdog fires at the
+recorded duration × 1.25 + 4000 ms, so the 10 s bound the suite carried until
+2026-10-11 never fired first. A removed write therefore read `TIMED_OUT`: seven
+mutants over the four callback keys in the history-free run of 2026-10-10,
+detected by the clock rather than by an assertion. Their same-key timeout budget
+also kept the stale `# error funnel` row, which no writer task could remove. At
+2 s each of those mutants reads `KILLED`. Do not restore the 10 s bound without
+re-auditing this file.
 
 ## Slow-covering-test advisory (new in sava-build 21.5.25)
 
@@ -299,11 +165,11 @@ coverage-phase advisory: `JettyConformanceTest.throwingHandlerFailureIsLogged`
 took 354–373 ms against a 250 ms threshold. It is an advisory, not a failure —
 the plugin is explicit that the measurement "does not prove the test covers a
 target mutant or prescribe a remedy". Recorded here because it is the cheapest
-standing pointer at *why* this suite races the watchdog at all: it is the
-slowest covering test in the repo's slowest suite, and PIT repays that
-wall-clock cost once per mutant it covers. Retiming it is the first thing to
-try if a load-dependent `TIMED_OUT` in this suite ever needs repair rather than
-audit.
+standing pointer at *why* this suite raced the watchdog before its 2 s bound:
+it is the slowest covering test in the repo's slowest suite, and PIT repays
+that wall-clock cost once per mutant it covers. Retiming it is the first thing
+to try if a load-dependent `TIMED_OUT` in this suite ever needs repair rather
+than audit.
 
 Jetty's `HttpFields.Mutable.put` returns `Mutable` rather than `void`, so
 `VoidMethodCallMutator` never fires on a header write. The suite therefore

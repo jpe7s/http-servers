@@ -113,7 +113,7 @@ method/path resolution (`HandlerMapImpl`, `HandlerLookup`).
   `PathCanonicalizerTests`.
 - `./gradlew :http-servers-core:pitestWiring` — PIT over `BaseHandlerWiring` (the handler-group
   include/exclude filter that decides which handlers get registered) against
-  `BaseHandlerWiringTests`. 78 mutants, **100% killed**, empty baseline — keep it that way.
+  `BaseHandlerWiringTests`. 70 mutants, **100% killed**, empty baseline — keep it that way.
 - `./gradlew :http-servers-core:pitestServer` — PIT over the `server` package except
   `BaseHandlerWiring` (owned by `pitestWiring`), against `server.*Test*`. Covers the
   builder's trailing-slash aliasing, method routing, controller snapshotting, the
@@ -124,7 +124,7 @@ method/path resolution (`HandlerMapImpl`, `HandlerLookup`).
   (`HttpResponse` factories and `withHeader` copy semantics, `HttpResponseTests`) and,
   since 2026-08-03, the `request` package alongside it: `Request` is all-abstract and
   contributes no mutants, but the ownership audit counts it as production code and this
-  package's `QueryHandler` is its one production consumer. 9 mutants, **100% killed**,
+  package's `QueryHandler` is its one production consumer. 14 mutants, **100% killed**,
   empty baseline — keep it that way.
 - `./gradlew :http-servers-core:pitestLogging` — PIT over `BaseJulLogger` against
   `logging.*Test*`. The placeholder formatter and `stringify` are package-private and
@@ -174,7 +174,7 @@ Helidon's own routing never decides a match. Versions come from `solana-version-
   armed `dispatch-timeouts.csv` — keep both that way. The covering tests are real socket round
   trips in `HelidonConformanceTest` and `HelidonPostHandlerTest`.
 
-The suite carries no socket-wait timeout family, unlike the jdk and jetty dispatch suites: a
+The suite carries no socket-wait timeout family, unlike the jdk dispatch suite: a
 controller or handler that returns without completing the response is answered 500 by Helidon's
 own routing, so a dropped `send()` is a status mismatch the covering test sees at once rather
 than a client blocked on a read.
@@ -215,7 +215,7 @@ later).
 - `./gradlew :http-servers-netty:pitestDispatch` — PIT over the whole `netty` package (wildcard)
   against `netty.*Test*`, with `EXPERIMENTAL_NAKED_RECEIVER` added to `STRONGER` because
   `HttpHeaders.set`, `ChannelPipeline.addLast`, `ChannelConfig.setAutoRead` and the
-  `ServerBootstrap` chain all return their receiver. 191 mutants, **100% killed**, no accepted
+  `ServerBootstrap` chain all return their receiver. 192 mutants, **100% killed**, no accepted
   baseline file and an empty, armed `dispatch-timeouts.csv` — keep it that way. The covering
   tests are real socket round trips in `NettyConformanceTest` and `NettyPostHandlerTest`, plus
   `NettyPipelineTest`, which drives the real channel initializer on an `EmbeddedChannel` so

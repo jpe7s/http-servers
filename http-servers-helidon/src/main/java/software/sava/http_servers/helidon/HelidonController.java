@@ -18,7 +18,7 @@ import static java.lang.System.Logger.Level.ERROR;
 /// other backends:
 ///
 /// - Helidon does not canonicalize before routing, so the ambiguous-path 400 is a live branch
-///   here (Jetty's `UriCompliance` answers it before the controller runs). Helidon does answer
+///   here (Jetty's `UriCompliance` answers most such targets first). Helidon does answer
 ///   a zero-byte 400 itself, before this controller, for a malformed percent escape
 ///   (`/pct%zz`), an illegal character in the request target (a backslash, say), and a missing
 ///   or blank `Host` header on HTTP/1.1; HTTP/1.0 never gets this far (505, see the README).

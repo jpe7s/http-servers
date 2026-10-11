@@ -34,87 +34,14 @@ normalised ticker — the gate's clock, so the two agree in differences and disa
 absolute readings, which is what makes a deadline computed from an absolute reading, or
 an accept time mutated to zero, observable).
 
-After the client-reset fix (2026-09-13, the soak harness's finding under "Killed by
-pinning": a client abandoning an upload with `RST` rather than `FIN` reached
-`NettyController.exceptionCaught` as a bare `Connection reset` `SocketException`, was logged
-`SEVERE` with a stack trace and answered 500 on a dead socket, where the orderly close of the
-same abandonment was already `DEBUG` with nothing written) the population is **191 mutants,
-191 killed, 0 `SURVIVED`, 0 `TIMED_OUT`, 0 `NO_COVERAGE`, 0 `RUN_ERROR`**, observed
-history-free on the final code (`pitestDispatch -PnoMutationHistory`, PIT's mutation phase 8 s
-of a 9 s run, 994 test executions, 5.2 per mutant) under 1-minute load averages of 13.1 at
-launch and 21.7 when it finished, `pitestDispatchVerify` 191/191, `mutationOwnershipAudit` 13
-classes owned. Line coverage of the mutated classes is 290/292, the two uncovered lines still
-`ResponseUtil`'s private constructor. A second history-free observation on the same code read
-the identical 191/191 population and verdicts (mutation phase 9 s of an 11 s run, 992
-executions, 5.19 per mutant, the same 290/292) under load averages of 19.5 at launch and 19.6
-at the finish. A third, after the review of that fix reworded the client-abort branch's `DEBUG`
-message (it fires for any peer-gone read, not only mid-body) and added the NIO-only notes,
-read the same 191/191 history-free (954 executions, 4.99 per mutant, the same 290/292,
-`pitestDispatchVerify` 191/191) under load averages of 35.1 at launch and 47.0 at the finish.
-Over the 180-mutant population that is +11, all of them
-in the extracted `NettyController.clientLeft`: the `PrematureChannelClosureException` guard (2
-`RemoveConditional` plus the `true` it returns), the `IOException` guard (2), the
-message rule (2 `RemoveConditional` siblings each way over `message != null &&
-message.contains(..)`, plus its `BooleanTrueReturnVals`) and the closing `false` (1).
-`exceptionCaught` itself is unchanged at 4 — the classification it used to make inline moved
-into the new method, taking its two mutants with it. Every one is killed by a named test
-below. The fix's own first observation, before the negative case was widened past
-`IOException`, read 191 mutants and 190 killed with one `SURVIVED` — `clientLeft`'s
-`RemoveConditionalMutator_EQUAL_IF` on the `IOException` guard, whose removal only matters for
-a throwable that is not an `IOException` and whose message says "Connection reset" anyway
-(mutation phase 9 s of a 10 s run, 972 executions, 5.09 per mutant) under load averages of
-31.3 at launch and 23.9 at the finish.
-
-After the expectation-refusal fix (2026-09-13, after the idle-timeout review: the
-delayed-reset defect under "Killed by pinning", its reproductions and the tests that pin
-the refusal contract) and the review of that fix the same day (the framing of a head the
-codec could not parse, below, and the tests that pin the malformed-head and
-unparsable-line shapes and the refusal over sockets) the population was **180 mutants, 180
-killed, 0 `SURVIVED`, 0 `TIMED_OUT`, 0 `NO_COVERAGE`, 0 `RUN_ERROR`**, observed
-history-free on the final code (`pitestDispatch -PnoMutationHistory`, PIT's mutation phase
-8 s of a 9 s run, 906 test executions, 5.03 per mutant) under a 1-minute load average of
-23.2 at launch and 31.1 when it finished, `pitestDispatchVerify` 180/180,
-`mutationOwnershipAudit` 13 classes owned — the gate's `Refusal` record is the thirteenth.
-Line coverage of the mutated classes is 283/285, the two uncovered lines still
-`ResponseUtil`'s private constructor. Over the 144-mutant idle-timeout population that is
-+36: from the refusal fix, the gate's `admit` (7), `refusal` (11) and `answer` (5),
-`channelRead`'s head dispatch (2) and its discard guard (2), `forward`'s `Refusal` branch
-(3) and its extracted `begin` call (1), and the decoder-failure guard of
-`NettyRequestAggregator.newContinueResponse` (3) — 34 — and from its review the
-decoder-failure conditional in `begin` (2) that frames an unparsable head as HTTP/1.1.
-`ResponseUtil.emptyResponse`'s two mutants add nothing to the total: they replaced the two
-inline `setContentLength` sites (the aggregator's `413` and the pre-flight `200`) it
-absorbed. Every one is killed by a named test below. The fix's own observation, before the
-review, read 178/178 (mutation phase 8 s of 10 s, 868 executions, 4.88 per mutant) under
-load averages of 35.7 at launch and 34.2 a minute after. There is still no
-`dispatch-accepted.csv`. Keep it that way.
-
-After the idle-timeout review (2026-09-13: the stalled-body fix, the knob validation and
-the tests below) the population was **144 mutants, 144 killed, 0 `SURVIVED`, 0
-`TIMED_OUT`, 0 `NO_COVERAGE`, 0 `RUN_ERROR`**, observed history-free on that code
-(`pitestDispatch -PnoMutationHistory`, PIT's mutation phase 10 s, 648 test executions,
-4.5 per mutant) under a 1-minute load average of 29 at the start and 39 at the end,
-`pitestDispatchVerify` 144/144, `mutationOwnershipAudit` 12 classes owned. The two
-mutants added were `NettyServerBuilder.<init>`'s `RemoveConditional` pair on the
-idle-timeout validation, both killed (below). Line coverage of the mutated classes was
-242/244. (The idle timeout's first observation, the same day and before the review, read
-142/142 under a load average of 5.75, `pitestDispatchVerify` green.) The attempt before that, on
-the same code under a load average of 8.92, produced the identical 142-mutant
-population with 141 killed and one `RUN_ERROR` — a minion death at
-`NettyRequestAggregator.handleOversizedMessage` / `VoidMethodCallMutator`, PIT's only
-diagnosis the generic "did not start or died during analysis", no resource failure
-named — which the verifier refused as invalid evidence; nothing was tuned, and the
-clean run is its closure, not its diagnosis. (History: the first
-seed was 106/105/1, the review-application pass 110/109/1, and the 2026-09-12 gate
-rework 132/132/0, observed history-free three times — `pitestDispatch
--PnoMutationHistory` twice, then `pitestDispatchBaselinePrune`'s own write-boundary
-run — under 1-minute load averages of 21–27; line coverage of the mutated classes was
-then 218/220, the two uncovered lines being `ResponseUtil`'s private constructor,
-which nothing calls and which generates no mutant. The prune removed the last
-accepted row and the plugin removed the file with it.) The review run's input
-identity differs from the 142-mutant run's, so the plugin reset the timeout-quiet
-counter and the prune-preview matches with it — state-reset notices, not findings;
-there is no timeout member to retire and no accepted row to prune.
+Every mutant in the suite is killed. There is no `dispatch-accepted.csv`, and the
+audited-timeouts set is empty and armed; keep it that way. Line coverage of the
+mutated classes misses only `ResponseUtil`'s private constructor, which nothing
+calls and which generates no mutant. The suite's last accepted row was retired
+through `pitestDispatchBaselinePrune` in the 2026-09-12 gate rework, and the plugin
+removed the empty file with it. A `RUN_ERROR` once seen at load (a minion death the
+verifier refused as invalid evidence) was closed by a clean re-run with nothing
+tuned, as AGENTS.md asks.
 
 ### Mutators: `STRONGER,EXPERIMENTAL_NAKED_RECEIVER` (measured 2026-09-12)
 
@@ -552,18 +479,11 @@ previews with the identical single-row candidate multiset, then
 
 ### Seed provenance
 
-The baseline was seeded 2026-09-12 by `pitestDispatchBaselineUpdate`, which runs
-its own fresh, full, history-free observation: 106 mutants, 105 killed, 1
-`SURVIVED`, 0 `TIMED_OUT`, 0 `NO_COVERAGE`, `RUN_ERROR` 0 for every mutator, under a
-load average of 134 with two further history-free observations (loads 130 and ~80)
-reading the identical population and verdicts. The 2026-09-12 gate rework was
-observed history-free five times in all: one run on the draft (133 mutants, the
-`handlerRemoved` loop `TIMED_OUT`), one on the refactored gate (132, all killed), one
-that read the pre-flight framing race `TIMED_OUT` (132, all detected), and — on the
-final code — the two prune previews and the prune's own write-boundary run (132 killed,
-nothing timed out), 1-minute loads 10–27. None of these was a solo-quiet machine by
-the certify rule (load under ~5); the suite is still owed one such observation
-before the first `hardeningCertify`.
+The baseline was seeded 2026-09-12 by `pitestDispatchBaselineUpdate`, from its own
+fresh, full, history-free observation, with one accepted row (`# backpressure`). The
+gate rework the same day moved ordering into `NettyRequestGate`, where that shape is
+killed, and `pitestDispatchBaselinePrune` retired the row after two matching
+history-free previews.
 
 ### Slow-covering-test advisory
 
@@ -591,21 +511,20 @@ The gate rework tripped that reviewer-stop twice, and neither instance is record
 because neither is liveness: `NettyRequestGate.handlerRemoved`'s
 `RemoveConditionalMutator_EQUAL_IF` (a loop whose exit was removed — refactored out,
 above) and `NettyController.dispatch`'s `VoidMethodCallMutator` on the pre-flight
-`Content-Length: 0` (the finite head-only-response race — repaired in process, above).
-The idle timeout (2026-09-13) added a third shape and refactored it out before it
-was observed: a re-arm for zero delay under the frozen test clock is an infinite loop
-inside `EmbeddedEventLoop.runScheduledTasks`, which no fixture bound reaches; the
-one-nanosecond floor in `NettyRequestGate.scheduleIdleCheck` ("Refactored out", above)
-makes the boundary mutant fail by assertion instead. Both history-free runs on the
-idle-timeout code (142 mutants before the review, 144 after it), the
-expectation-refusal run (178), its review-application run (180) and both client-reset runs
-(191) read zero `TIMED_OUT`. Any future `TIMED_OUT` in this suite is, by
-construction, a covering test that exceeded its bound *and* PIT's margin, a head-only
-response an `HttpClient` case was left to wait on, or a scheduled task re-armed for
-the instant it runs in: a `SURVIVED`↔`TIMED_OUT` flip of a row that should already be
-argued here, or a `KILLED`↔`TIMED_OUT` finite race to be repaired with a wire or
-clock assertion — never a liveness argument, since every hang this suite can produce
-is bounded.
+`Content-Length: 0` (the finite head-only-response race — repaired in process,
+above). The idle timeout (2026-09-13) added a third shape and refactored it out
+before it was observed: a re-arm for zero delay under the frozen test clock is an
+infinite loop inside `EmbeddedEventLoop.runScheduledTasks`, which no fixture bound
+reaches; the one-nanosecond floor in `NettyRequestGate.scheduleIdleCheck`
+("Refactored out", above) makes the boundary mutant fail by assertion instead. Every
+history-free run recorded since the idle-timeout code of 2026-09-13 has read zero
+`TIMED_OUT`. Any future `TIMED_OUT` in this suite is, by construction, a covering
+test that exceeded its bound *and* PIT's margin, a head-only response an
+`HttpClient` case was left to wait on, or a scheduled task re-armed for the instant
+it runs in: a `SURVIVED`↔`TIMED_OUT` flip of a row that should already be argued
+here, or a `KILLED`↔`TIMED_OUT` finite race to be repaired with a wire or clock
+assertion — never a liveness argument, since every hang this suite can produce is
+bounded.
 
 One trap worth naming: a history-assisted run (`pitestDispatch` without
 `-PnoMutationHistory`) on a machine whose `.pitest-history/` predates the 2 s

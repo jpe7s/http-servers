@@ -41,7 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// cannot leak between PIT mutants ("When a mutant won't die"). Tests that own a server's
 /// lifecycle explicitly (`startOwned`, `startOnAnOccupiedPortThrows`) close it themselves.
 ///
-/// Every client request and raw socket carries a 2 s bound (the sibling suites use 10 s).
+/// Every client request and raw socket carries a 2 s bound (the JDK and Helidon suites use 10 s).
 /// A dropped response write leaves the client blocked on a read, and PIT's per-mutant
 /// watchdog fires at the recorded duration × 1.25 + 4000 ms — so a 10 s bound never fires
 /// first and such mutants read as `TIMED_OUT`, detected by the clock rather than by this

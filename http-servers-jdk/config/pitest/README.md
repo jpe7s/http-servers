@@ -17,14 +17,11 @@ Registered when `JdkController` gained real routing logic (the shared
 `HandlerMap` dispatch that fixed jdk-context prefix matching). The covering
 tests are real socket round trips (`JdkConformanceTest`,
 `JdkPostHandlerTest`), so the suite runs slower per mutant than an
-in-process one. 48 mutants since the connection-hygiene rework of
-2026-09-14 and the review that followed it the same day (the two added are
-the request-body cache's `body == null` siblings, both killed), **100%
-detected**, 2 `TIMED_OUT` — down from 7: the rework turned five
-unanswered-exchange hangs into closed connections the client sees at once
-(see the audited timeouts below) — observed identically in two full
-history-free runs of each state; not unioned into the baseline, which stays
-empty. Keep it that way.
+in-process one. Every mutant is detected, and the only `TIMED_OUT` reads fall
+under the audited timeouts below: the connection-hygiene rework of 2026-09-14
+turned five unanswered-exchange hangs into closed connections the client sees
+at once, which took the suite from seven timed-out mutants to two. Nothing is
+unioned into the baseline, which stays empty. Keep it that way.
 
 ### Connection hygiene (2026-09-14)
 

@@ -114,8 +114,8 @@ custom-header writes, the `status(...)` call, and the `shutdownGracePeriod` /
 this run's report — nothing to seed") and prescribed the comment-only file, so a
 first timeout lands as the reviewer-stop it is rather than as silent detection.
 
-Why this backend lacks the socket-wait liveness family the jdk and jetty suites
-carry: when a mutant drops a `send()` (or the `handler.handle` dispatch) the
+Why this backend lacks the socket-wait liveness family the jdk suite carries, and
+the jetty suite carried until its 2 s retiming: when a mutant drops a `send()` (or the `handler.handle` dispatch) the
 controller returns with the response unsent, and Helidon's `HttpRoutingImpl`
 answers 500 itself ("A route MUST call either send, reroute, or next on
 ServerResponse"). Every such mutant is a status mismatch the covering test sees

@@ -945,12 +945,8 @@ final class JettyConformanceTest {
   /// The connector must bind the host it was given, never the wildcard — read synchronously
   /// off the unstarted connector, with no socket, no clock and nothing to clean up.
   /// `startOnAnOccupiedPortThrows` above reaches the same property through a bind conflict,
-  /// but only by racing PIT's watchdog, and when the host guard is mutated away that case
-  /// starts a server it never expected to exist and cannot stop it, since `HttpServer`
-  /// exposes only `start()`. PIT stops at the first killing test and still attributes the
-  /// line-34 kill to that case, so this one does not replace it; it pins the property
-  /// against an oracle that cannot time out, and keeps it pinned if that case is ever
-  /// retimed or reshaped.
+  /// and stops whatever server a mutated host guard lets it start; PIT credits the guard's
+  /// kill to this case, whose oracle cannot time out.
   @Test
   void theConnectorBindsTheRequestedHost() {
     try (final var executor = Executors.newVirtualThreadPerTaskExecutor()) {
