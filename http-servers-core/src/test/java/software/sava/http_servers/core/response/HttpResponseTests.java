@@ -92,6 +92,22 @@ final class HttpResponseTests {
   }
 
   @Test
+  void finalStatusesPassThroughUnchanged() {
+    assertEquals(200, HttpResponse.checkFinalStatus(200));
+    assertEquals(404, HttpResponse.checkFinalStatus(404));
+    assertEquals(599, HttpResponse.checkFinalStatus(599));
+  }
+
+  @Test
+  void interimAndInvalidStatusesAreRefused() {
+    for (final int status : new int[]{199, 103, 100, 0, -200, 600, 999}) {
+      final var e = assertThrows(IllegalStateException.class, () -> HttpResponse.checkFinalStatus(status),
+          "status " + status);
+      assertTrue(e.getMessage().endsWith(" " + status), e.getMessage());
+    }
+  }
+
+  @Test
   void withHeaderPreservesInsertionOrderOfNewNames() {
     final var resp = HttpResponse.response("text/plain", BODY)
         .withHeader("X-A", "1")

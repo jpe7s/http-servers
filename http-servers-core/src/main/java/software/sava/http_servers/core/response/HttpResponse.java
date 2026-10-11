@@ -43,6 +43,20 @@ public interface HttpResponse {
     return json(200, body);
   }
 
+  /// The status a backend writes for a handler's response: `statusCode` itself when it is a
+  /// final status, `200` through `599`. A `1xx` is an interim answer that RFC 9110 §15.2 says a
+  /// final response must follow, and nothing outside `100`–`599` is a valid status (§15), so a
+  /// handler that returns either has failed like one that throws: every backend writes the
+  /// status this returns, and answers the [IllegalStateException] it throws with `500`.
+  ///
+  /// @throws IllegalStateException if `statusCode` is not a final status
+  static int checkFinalStatus(final int statusCode) {
+    if (statusCode < 200 || statusCode > 599) {
+      throw new IllegalStateException("A handler's response needs a final status (200-599), not " + statusCode);
+    }
+    return statusCode;
+  }
+
   int statusCode();
 
   String contentType();
