@@ -22,9 +22,9 @@ info:
 
     **Backend-dependent error bodies.** The status codes and the `Allow` header are identical
     across backends, but the bodies are not. The Jetty, Helidon and Netty controllers write a JSON
-    `{"msg": "..."}` explanation on `404` and `405`, and on the `500` that answers a handler's
-    `RuntimeException`; the JDK backend sends those statuses with an empty body, and `404` and
-    `405` with no `Content-Type`. Treat the error body as advisory and branch on the status code.
+    `{"msg": "..."}` explanation on `404` and `405`, and on the `500` that answers a failed
+    handler; the JDK backend sends those statuses with an empty body and no `Content-Type`. Treat
+    the error body as advisory and branch on the status code.
     This is described per-response below.
 
     **Backend-dependent CORS.** Only the Jetty, Helidon and Netty backends implement CORS. The JDK
@@ -152,8 +152,8 @@ components:
       type: object
       description: |
         Explanation written by the Jetty, Helidon and Netty controllers on `404` and `405`, and on
-        the `500` that answers a handler's `RuntimeException`. The JDK backend sends no body at all
-        for these statuses.
+        the `500` that answers a failed handler. The JDK backend sends no body at all for these
+        statuses.
       required: [msg]
       properties:
         msg:
@@ -201,9 +201,10 @@ components:
 
     InternalServerError:
       description: |
-        The handler threw a `RuntimeException`. The failure is logged server-side and nothing of it
-        reaches the caller. Body is JSON with a fixed message on Jetty, Helidon and Netty, empty on
-        the JDK backend.
+        The handler failed: it threw (a `RuntimeException` or an `Error`), or its response carried
+        a status that is not final (a `1xx`, or one outside `100`–`599`). The failure is logged
+        server-side and nothing of it reaches the caller. Body is JSON with a fixed message on
+        Jetty, Helidon and Netty; empty, with no `Content-Type`, on the JDK backend.
       content:
         application/json:
           schema:

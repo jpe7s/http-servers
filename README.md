@@ -123,27 +123,34 @@ HttpResponse.json(402, "{\"error\":\"payment required\"}")
     .withHeader("X-Payment-Response", settlement);
 ```
 
-A handler that throws a `RuntimeException` is answered with `500` and the failure is logged;
-nothing of the failure reaches the caller. The Jetty, Helidon and Netty backends send
-`{"msg": "Failed to process request."}` as JSON, and the JDK backend sends no body. An `Error`
-gets the same `500` only on Jetty and on Netty's non-blocking routes: Helidon answers it with its
-own `text/plain` `500`, and the JDK backend and Netty's blocking routes do not answer it at all.
-The page Jetty writes for an error it answers itself, such as a response whose `Content-Length`
-does not match its body, shows the status reason where the default page showed the failure.
+A handler that throws, a `RuntimeException` or an `Error`, is answered with `500` and the failure
+is logged; nothing of the failure reaches the caller. So is a handler whose response carries a
+status that is not final: a `1xx`, or anything outside `100`–`599`. Every backend applies
+`HttpResponse.checkFinalStatus` to the status it is about to write. The Jetty, Helidon and Netty
+backends send `{"msg": "Failed to process request."}` as JSON. The JDK backend sends no body, and
+none of the headers the handler's response had set. Netty also closes the connection after the
+`500` that answers an `Error`. The page Jetty writes for an error it answers itself, such as a
+response whose `Content-Length` does not match its body, shows the status reason where the default
+page showed the failure.
 
 #### Backend divergences
 
-Routing, status codes, header propagation and the raw path and query contract are identical on
-every backend. The framing a server puts around a response is its own, so the contract below is
+Routing, status codes, header propagation and the raw path and query contract match across
+backends, except for the divergences listed in this section and under CORS. The framing a server puts around a response is its own, so the contract below is
 what a caller may rely on rather than the bytes any one backend happens to emit.
+
+**Method tokens.** RFC 9110 §9.1 makes the method token case-sensitive, and the JDK, Jetty and
+Netty backends route it as received. Helidon's parser upper-cases it, so a lowercase `get`
+reaches a `GET` route on Helidon and is answered `405` everywhere else.
 
 **Bodyless statuses.** A `204` or a `304` is sent without a body everywhere, and no backend
 chunks either of them. `Content-Length: 0` is the backend's own choice: the JDK and Netty
 backends send neither `Content-Length` nor `Transfer-Encoding` on either status, Jetty omits
 `Content-Length` on `204` and sends `Content-Length: 0` on `304`, and Helidon sends
 `Content-Length: 0` on both. Assert that `Content-Length` is absent or exactly `0`, never that it
-is present. Helidon treats `205` as bodyless too, because that is its own no-entity set, so
-content a handler attaches to a `205` is dropped there and sent by every other backend.
+is present. Helidon and Netty treat `205` as bodyless too: it is in Helidon's own no-entity set,
+and Netty's codec writes every `205` with `Content-Length: 0`. Content a handler attaches to a
+`205` is therefore dropped on those two backends and sent only by the JDK and Jetty backends.
 
 **Executors.** Handlers run on virtual threads. The `Executor` handed to `createServer` is
 honoured by the JDK backend for every exchange — `jdk.httpserver` dispatches each one onto it,
@@ -169,7 +176,8 @@ only when a client stalls: the head waits until the declared body has arrived, f
 client takes to send it — a slow or merely large upload to an unrouted path delays its `404` by
 its own transfer time — up to `jdk.httpserver`'s drain amount (`sun.net.httpserver.drainAmount`,
 64 KiB by default), past which the head is written and the connection closed after it, as before.
-A handler that throws a `RuntimeException` is still answered `500` and logged at `ERROR`.
+A handler that throws, a `RuntimeException` or an `Error`, is still answered `500` and logged at
+`ERROR`.
 
 **HTTP/1.0.** The JDK, Jetty and Netty backends answer an `HTTP/1.0` request and close the
 connection afterwards unless it asks for
@@ -190,12 +198,22 @@ string and `null` alike; `HandlerUtil` already does.
 `io.helidon.webserver:helidon-webserver-http2` is added as a `runtimeOnly` dependency, which also
 replaces its clean `HTTP/1.0` `505` with no answer at all: the connection is closed with zero
 bytes when a `Host` header is present and held open until the idle timeout when it is not. Do not
-enable it in front of `HTTP/1.0` clients. The JDK and Netty backends speak HTTP/1.1 only.
+enable it in front of `HTTP/1.0` clients. The JDK and Netty backends speak HTTP/1.1 only. On
+Jetty, a response that completes while its request body is still arriving ends the stream with
+`RST_STREAM(CANCEL)`. That happens when a handler answers without reading an upload, or fails
+during one. RFC 9113 §8.1 describes `NO_ERROR` for that reset, and a client may discard a response
+on `CANCEL`. The JDK `HttpClient` does, and reports the reset instead of the status. This is
+Jetty's own stream handling (12.1.14), which the adapter could only avoid by reading the whole
+upload before it answers. HTTP/1.1 is unaffected: there the answer says `Connection: close` and the
+connection ends after it.
 
 **Connection persistence.** A handler that sets `Connection: close` on its response ends the
 connection after that response on every backend: the header reaches the wire and the server
 closes. Persistence is decided from both sides — the request's keep-alive and the response's
 close directive — so a keep-alive request answered with `Connection: close` does not stay open.
+On Jetty, an answer written before the request body has fully arrived carries `Connection: close`,
+and the connection ends after it. That covers the controller's own `400`, `404`, `405` and `500`,
+and a handler or cached response that answers without reading the body.
 
 **Pipelining on Netty.** Netty serves one request per connection at a time and answers pipelined
 requests strictly in request order (RFC 9112 §9.3.2), whoever produces the answer: a handler, the
@@ -247,6 +265,11 @@ delivers its idle timeout to whatever the request is waiting on: a handler waiti
 has stopped gets a `500` and the connection is closed, while a handler that is busy rather than
 waiting is left to finish and its response is still delivered. Netty's rule is Jetty's on both
 counts and diverges from the JDK only in closing the stalled body.
+
+**The asterisk form.** `OPTIONS *` (RFC 9112 §3.2.4) addresses the server rather than a
+resource, and no registered handler can match it. The Jetty, Helidon and Netty backends refuse
+it with the controller's JSON `400`, since `*` is not a rooted path. The JDK server answers it
+`404` itself, before the adapter sees it.
 
 **Absolute-form targets.** A request line in absolute form, `GET http://host/p HTTP/1.1`, is
 refused with `400` by Netty, which routes on the target as received. The JDK and
