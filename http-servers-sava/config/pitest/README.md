@@ -29,7 +29,7 @@ Both suites run `STRONGER,EXPERIMENTAL_NAKED_RECEIVER` since the scripted
 handlers — all killed by existing tests; the JSON builders and byte-array
 slicing are receiver-returning calls the default set cannot express).
 
-## x402 suite (7 keys / 10 retained rows; fresh PIT 1.30.0 result: 9 survived, 1 no_coverage)
+## x402 suite
 
 **PIT 1.25.9 population migration (2026-08-04): 388 -> 389 mutants, one new
 row, killed — the baseline is unchanged.** The newcomer is
@@ -145,7 +145,7 @@ committed `crash_*` corpus inputs pin both lazy shapes.
   parsing. The decode catch *above* verify is the live path, covered by
   `malformedTransactionPayloadDoesNotSubmit` / `nullPayloadDoesNotSubmit`.
 
-## handlers suite (4 keys / 5 rows, all `SURVIVED`, all in `parsePublicKeyParams`)
+## handlers suite (all `SURVIVED`, all in `parsePublicKeyParams`)
 
 Line 42 holds two sibling `ConditionalsBoundary` mutants — one row per
 sibling since the 2026-07-24 multiset upgrade. Both twins carry the same

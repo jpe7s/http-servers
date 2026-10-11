@@ -85,8 +85,8 @@ custom-header writes, the `status(...)` call, and the `shutdownGracePeriod` /
   accepted, keeping the empty baseline.
 - The bodyless set widened to 205 (`ResponseUtil.writeResponse`, the
   `204 || 205 || 304` compound): Helidon's no-entity set is {204, 205, 304}, so a
-  205 with a body reaches `send()` and Helidon answers 500 where the other
-  backends send the body. **Property:** the adapter, not the handler, owns the
+  205 with a body reaches `send()` and Helidon answers 500 where the JDK and
+  Jetty backends send the body and Netty's codec drops it. **Property:** the adapter, not the handler, owns the
   bodyless contract for every status Helidon treats as no-entity. **Oracle:**
   RFC 9110 §15.3.6. **Outcome:** production fix (add 205 to the guard) plus 205
   added to `noContentAndNotModifiedCrossTheWireWithoutABody` and

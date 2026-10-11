@@ -133,18 +133,18 @@ sites were refactored out rather than accepted (see "Refactored out").
 
 ### Fixture bound: 2 s, and why it is not 10 s
 
-The sibling suites bound every client request at 10 s. The first pass of this
-suite did the same and read 31 `TIMED_OUT` instances over 24 line-less keys —
-every one a dropped or never-completed response write that leaves the client
-blocked on a read. PIT's per-mutant watchdog fires at the recorded duration × 1.25 +
-4000 ms — about 4 s at these durations — so a 10 s bound can never fire first and
-contributes no cause evidence: detection would have been the clock, not this
-suite. The 21.5.25 rule says to shorten such a bound and re-observe. At 2 s the
-bound beats the watchdog with two seconds to spare, and a hang fails the test as
-an `HttpTimeoutException` / `SocketTimeoutException` — an assertion-level kill.
-Every raw-socket case additionally reads one Content-Length delimited response
-and asserts on it before waiting for the close, so a wrong status or a missing
-framing header dies by its assertion rather than by the bound.
+The JDK and Helidon suites bound every client request at 10 s, as Jetty's did until
+2026-10-11. The first pass of this suite did the same and read 31 `TIMED_OUT`
+instances over 24 line-less keys — every one a dropped or never-completed response
+write that leaves the client blocked on a read. PIT's per-mutant watchdog fires at
+the recorded duration × 1.25 + 4000 ms — about 4 s at these durations — so a 10 s
+bound can never fire first and contributes no cause evidence: detection would have
+been the clock, not this suite. The 21.5.25 rule says to shorten such a bound and
+re-observe. At 2 s the bound beats the watchdog with two seconds to spare, and a
+hang fails the test as an `HttpTimeoutException` / `SocketTimeoutException` — an
+assertion-level kill. Every raw-socket case additionally reads one Content-Length
+delimited response and asserts on it before waiting for the close, so a wrong status
+or a missing framing header dies by its assertion rather than by the bound.
 
 One shape the 2 s bound does not cover: `HttpRequest.timeout` bounds the arrival of
 the response *head* only, so a response that arrives without `Content-Length` on a
@@ -265,9 +265,9 @@ previews with the identical single-row candidate multiset, then
   Removed rather than measured.
 - `NettyController`'s pending queue, `completed`, `setAutoRead` and the guarded
   write-completion listener — moved wholesale into the gate. The property the guard
-  pinned (a queued handler's `Error` is answered 500 and closed) still holds through
-  the pipeline's own routing of a `channelRead` throw to the throwing handler's
-  `exceptionCaught`, and `errorEscapingAQueuedHandlerIsAnsweredAndLogged` still pins it.
+  pinned (a queued handler's `Error` is answered 500 and closed) still holds: `invoke`
+  answers a handler's `Error` itself, wherever its request came from, and
+  `errorEscapingAQueuedHandlerIsAnsweredAndLogged` still pins it.
 - `NettyHttpServer.shutdown` — the first draft waited with
   `terminationFuture().syncUninterruptibly()`, whose `NakedReceiverMutator` (drop
   the wait) survived: `stop()` then returns while the loop threads are still
@@ -460,9 +460,11 @@ previews with the identical single-row candidate multiset, then
   `oversizedBodiesAreRefusedWith413`. The `Expect: 100-continue` refusal is no longer
   its sibling here: the gate's `413` (above) carries the same headers and close.
 - `ResponseUtil.closeAfter`'s `Connection: close` (one site shared by the malformed
-  400, the `exceptionCaught` 500 and both 413s): `malformedRequestsAreRefusedAndClosed`,
+  400, the 500 `invoke` writes for a handler's `Error`, the `exceptionCaught` 500 and
+  both 413s): `malformedRequestsAreRefusedAndClosed`,
   `errorEscapingANonBlockingHandlerIsAnsweredAndLogged` and the 413 cases above all
-  read to EOF.
+  read to EOF, and `aFailureThatIsNotAClientLeavingIsStillAnswered` asserts the close
+  on `exceptionCaught`'s own 500.
 - `NettyController.exceptionCaught`'s client-abort branch, and the client reset it used to
   miss (2026-09-13, the soak harness's finding). Oracle: the README's own promise for this
   backend — a connection that ends while a request body is still arriving is a client
@@ -510,8 +512,8 @@ previews with the identical single-row candidate multiset, then
   a fresh connection still answered 200; it is the case that reproduced the harness's exact
   finding, failing against the old classification on that `SEVERE Failed to process request.
   java.net.SocketException: Connection reset` — against
-  `errorEscapingANonBlockingHandlerIsAnsweredAndLogged` (a real `Error` still answered 500 and
-  logged at `ERROR`).
+  `aFailureThatIsNotAClientLeavingIsStillAnswered` (failures that are not a client leaving,
+  fired through the pipeline, still answered 500 and logged at `ERROR`).
 - One statement of that rule generates no mutant and is pinned by test anyway:
   `clientLeft` matches the reset phrase with `contains`, and no enabled mutator expresses
   `equals`/`startsWith` in its place. `aNativeConnectionResetIsNotAServerFailure` fires the

@@ -4,7 +4,7 @@ Each `pitest<Suite>` run is finalized by `pitest<Suite>Verify`, which diffs the
 run's unkilled mutants against the accepted baseline in `<suite>-accepted.csv`
 and **fails on anything new**. Full policy lives in sava-build's `HARDENING.md`.
 
-## dispatch suite (15 keys / 15 rows: 12 survived, 3 no_coverage) — seeded 2026-07-22
+## dispatch suite — seeded 2026-07-22
 
 The 2026-07-24 canonical-routing contract added the compliance-backstop
 family below (the only `NO_COVERAGE` rows in the suite).
@@ -73,13 +73,28 @@ Killed by pinning rather than accepted: the pre-flight detection conditions
 work on the provided executor deterministically; killed via a recording
 executor 2026-07-22).
 
-- **`# handled-flag family`** (`JettyController` 67/79/82/88,
-  `JettyQueryHandler.handle` 43, `JettyCachedJsonResponseHandler.handle` 28):
-  mutants on the boolean a `Handler.handle` returns. Every return sits after
-  the response is committed (`Content.Sink.write` / `response.write` /
-  `callback.succeeded()`), and Jetty ignores the handled flag once the
-  response is committed — the wire response is identical either way. These are
-  the rows observed to flip under load.
+- **`# handled-flag family`**: mutants on the boolean a `Handler.handle`
+  returns. The members are these `JettyController.handle` returns: the `return
+  true` after its own 400/404/405, after the pre-flight and after the catch's
+  500, and the routed `return handler.handle(…)`. They also include
+  `JettyQueryHandler.handle` and `JettyCachedJsonResponseHandler.handle`, each
+  after its write. The routed return's `true` direction is equivalent rather
+  than racy: both routed handlers return `true` unconditionally, so replacing
+  their result with `true` changes nothing. For every other member, the mutant's
+  `false` comes after the write or `callback.succeeded()` that committed the
+  response, and Jetty answers a `false` with `Response.writeError(…, 404)`
+  (`HttpChannelState`'s handler invoker). On a committed response, `writeError`
+  only fails the callback. That is a no-op once the write has completed it
+  (`ChannelCallback` ignores a second completion), and an aborted response while
+  the write is still in flight. The machine's load decides that race, so these
+  are the rows observed to flip under load. The catch's `return true` was
+  already a member while the catch failed the callback. Since the catch writes
+  the JSON 500 itself (2026-10-10), it races like the rest. It was killed in
+  that day's solo history-free run and survived under certification the same
+  evening. In that run it was matched by the row whose `# line` tag still names
+  the old catch, so the line-drift advisory at this key names the catch's
+  current line. That reading is this member, not a swap. Its tag lags until a
+  run that sees it survive is retagged.
 - The former wildcard-bind family (`initRestServer` 34 both skip-directions,
   35 `setHost` removal) was killed 2026-07-24 by `startOnAnOccupiedPortThrows`:
   the occupied `localhost` address makes a wildcard bind dodge the conflict

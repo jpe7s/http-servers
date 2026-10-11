@@ -162,7 +162,7 @@ because since value decoding landed the parser is no longer just a splitter. See
 
 ### http-servers-helidon — Helidon backend (`software.sava.http_servers.helidon`)
 
-Helidon WebServer 4.5.4 behind the shared `HandlerMap`, reached from one catch-all route so
+Helidon WebServer 4.5.5 behind the shared `HandlerMap`, reached from one catch-all route so
 Helidon's own routing never decides a match. Versions come from `solana-version-catalog`
 (25.30.21 and later).
 
@@ -193,7 +193,7 @@ at all.
 
 ### http-servers-netty — Netty backend (`software.sava.http_servers.netty`)
 
-Netty 4.2.18 behind the shared `HandlerMap`. Each connection's pipeline is `HttpServerCodec` →
+Netty 4.2.19.Final behind the shared `HandlerMap`. Each connection's pipeline is `HttpServerCodec` →
 `NettyRequestGate` → `NettyRequestAggregator` → `NettyController`: the gate owns response
 ordering, connection persistence and the idle timeout (one request in flight per connection,
 reads paused while a complete request awaits its answer, `Connection: close` decided from both
@@ -230,19 +230,20 @@ retired through the Prune protocol when ordering moved into `NettyRequestGate`, 
 shape is killed by the in-process `isAutoRead()` assertions. The reasoning, and the sites
 refactored out rather than accepted, are in `config/pitest/README.md`.
 
-This suite's fixtures bound every `HttpClient` request and raw socket at 2 s where the sibling
-adapter suites use 10 s, and that bound is load-bearing for the records: the first pass at 10 s
-read 31 `TIMED_OUT` instances over 24 keys, every one a dropped response write, and a 10 s bound
-can never fire inside PIT's own margin, so detection was the watchdog rather than an assertion.
-At 2 s each of those reads `KILLED`. Do not restore the 10 s convention without re-auditing the
-timeouts file. A history-assisted run on a machine whose `.pitest-history/` predates the retiming
-replays the old `TIMED_OUT` verdicts; run `-PnoMutationHistory` before any record decision.
-The suite's one real-time case is `anIdleConnectionIsClosedAfterTheIdleTimeout` (a 200 ms idle
-timeout through the builder knob, EOF read under the 2 s bound, and a causal lower bound on
-the elapsed time); `config/pitest/README.md` records its bound against PIT's margin, and it is
-now the suite's slowest covering test. The idle rule's oracle is split and recorded there: the
-JDK and Jetty both close a silent connection between requests; Jetty alone fails a stalled
-request body (the JDK holds it for good); neither interrupts a busy handler.
+This suite's fixtures bound every `HttpClient` request and raw socket at 2 s, as Jetty's have since
+2026-10-11, where the JDK and Helidon suites use 10 s, and that bound is load-bearing for the
+records: the first pass at 10 s read 31 `TIMED_OUT` instances over 24 keys, every one a dropped
+response write, and a 10 s bound can never fire inside PIT's own margin, so detection was the
+watchdog rather than an assertion. At 2 s each of those reads `KILLED`. Do not restore the 10 s
+convention without re-auditing the timeouts file. A history-assisted run on a machine whose
+`.pitest-history/` predates the retiming replays the old `TIMED_OUT` verdicts; run
+`-PnoMutationHistory` before any record decision. The suite's one real-time case is
+`anIdleConnectionIsClosedAfterTheIdleTimeout` (a 200 ms idle timeout through the builder knob, EOF
+read under the 2 s bound, and a causal lower bound on the elapsed time); `config/pitest/README.md`
+records its bound against PIT's margin, and it is now the suite's slowest covering test. The idle
+rule's oracle is split and recorded there: the JDK and Jetty both close a silent connection between
+requests; Jetty alone fails a stalled request body (the JDK holds it for good); neither interrupts a
+busy handler.
 
 ### http-servers-sava — x402 payment gate (`software.sava.http_servers.sava.x402`)
 
@@ -264,7 +265,7 @@ sponsors, so this is the most heavily tested surface.
   data lengths overrun silently — pinned by the corruption tests in
   `SvmExactVerifierTest`).
 - `./gradlew :http-servers-sava:pitestHandlers` — PIT over `handlers.*` (public-key query
-  params) against `handlers.*Test*`. 37 mutants, 86% detected; the 4 baseline keys (5 rows) are
+  params) against `handlers.*Test*`. 37 mutants, 86% detected; the 5 baseline rows (2 line-less keys) are
   triaged equivalents (empty-list identity and unreachable scan boundaries — see
   `config/pitest/README.md`).
 - `./gradlew :http-servers-sava:fuzzSvmVerify -PmaxFuzzTime=<seconds>` — Jazzer over
