@@ -17,9 +17,9 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /// Pins the parts of the core Request/HttpResponse contract that every backend must agree
-/// on: the raw query string, 500 on a throwing handler (never a hang or connection abort),
-/// custom status/header propagation (the x402 payment-gate shape), cached JSON responses,
-/// and case-insensitive request-header lookup.
+/// on: the raw query string, 500 on a throwing handler or a non-final status (never a hang or
+/// connection abort), custom status/header propagation (the x402 payment-gate shape), cached
+/// JSON responses, and case-insensitive request-header lookup.
 final class JettyConformanceTest {
 
   private static final software.sava.http_servers.core.server.HttpServerBuilderFactory FACTORY =
@@ -122,6 +122,24 @@ final class JettyConformanceTest {
     }
   }
 
+  /// A handler that returns an interim status has failed like one that throws, and gets the same
+  /// JSON 500. Written as given, a `103` goes out as an interim head without its body, and the
+  /// final response the client then waits for is never written.
+  @Test
+  void interimStatusFromAHandlerAnswers500() throws Exception {
+    final int port = serve(builder ->
+        builder.blockingQueryHandler("/early", request ->
+            HttpResponse.response(103, "text/plain", "early".getBytes(StandardCharsets.UTF_8))));
+
+    final var response = rawGet(port, "/early");
+    assertEquals(500, rawStatus(response), response);
+    assertEquals("application/json", rawHeader(response, "Content-Type"), response);
+    assertEquals("""
+        {
+          "msg": "Failed to process request."
+        }""", rawBody(response), response);
+  }
+
   /// The page Jetty writes for an error it answers itself names the status reason, not the
   /// failure. A response declaring a shorter `Content-Length` than its body is refused by
   /// Jetty's write before the head is committed, and the default page would print the
@@ -158,6 +176,90 @@ final class JettyConformanceTest {
         + "x".repeat(1000));
     assertEquals(500, rawStatus(exchange.response()), exchange.response());
     assertEquals("close", rawHeader(exchange.response(), "Connection"), exchange.response());
+  }
+
+  /// The controller's 404, answered while an upload to an unrouted path is still arriving, says
+  /// `Connection: close` as the 500 above does: Jetty keeps no connection whose body it could not
+  /// consume, so the head has to announce the close that follows it.
+  @Test
+  void notFoundMidUploadAnnouncesTheClose() throws Exception {
+    final int port = serve(builder ->
+        builder.blockingQueryPost("/upload", request -> HttpResponse.response("text/plain", "ok")));
+
+    final var exchange = rawExchange(port, "POST /nowhere HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+        + "Content-Type: application/octet-stream\r\nContent-Length: 2000000\r\n\r\n"
+        + "x".repeat(1000));
+    assertEquals(404, rawStatus(exchange.response()), exchange.response());
+    assertEquals("close", rawHeader(exchange.response(), "Connection"), exchange.response());
+  }
+
+  /// The same for the controller's 405: an upload still arriving at a GET-only path.
+  @Test
+  void methodNotAllowedMidUploadAnnouncesTheClose() throws Exception {
+    final int port = serve(builder ->
+        builder.blockingQueryHandler("/get-only", request -> HttpResponse.response("text/plain", "got")));
+
+    final var exchange = rawExchange(port, "POST /get-only HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+        + "Content-Type: application/octet-stream\r\nContent-Length: 2000000\r\n\r\n"
+        + "x".repeat(1000));
+    assertEquals(405, rawStatus(exchange.response()), exchange.response());
+    assertEquals("close", rawHeader(exchange.response(), "Connection"), exchange.response());
+  }
+
+  /// The same for a handler's own answer when the handler returns without reading the body.
+  @Test
+  void unreadBodyMidUploadAnnouncesTheClose() throws Exception {
+    final int port = serve(builder ->
+        builder.blockingQueryPost("/ignore", request -> HttpResponse.response("text/plain", "ignored")));
+
+    final var exchange = rawExchange(port, "POST /ignore HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+        + "Content-Type: application/octet-stream\r\nContent-Length: 2000000\r\n\r\n"
+        + "x".repeat(1000));
+    assertEquals(200, rawStatus(exchange.response()), exchange.response());
+    assertEquals("close", rawHeader(exchange.response(), "Connection"), exchange.response());
+  }
+
+  /// And for a cached response, which never reads a body: a request to a cached route that
+  /// declares one and is still sending it is answered with `Connection: close` as well.
+  @Test
+  void cachedResponseMidUploadAnnouncesTheClose() throws Exception {
+    final int port = serve(builder ->
+        builder.cachedQueryHandler("/cached", () -> "{\"a\":1}".getBytes(StandardCharsets.UTF_8)));
+
+    final var exchange = rawExchange(port, "GET /cached HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+        + "Content-Type: application/octet-stream\r\nContent-Length: 2000000\r\n\r\n"
+        + "x".repeat(1000));
+    assertEquals(200, rawStatus(exchange.response()), exchange.response());
+    assertEquals("close", rawHeader(exchange.response(), "Connection"), exchange.response());
+  }
+
+  /// The other side of the cases above: a small POST whose body has fully arrived, and was read,
+  /// keeps its connection, so a request pipelined behind it on the same socket is answered.
+  /// Consuming before the head is written closes only a connection with body still to come.
+  @Test
+  void fullyReceivedPostKeepsTheConnection() throws Exception {
+    final int port = serve(builder -> {
+      builder.blockingQueryPost("/echo", request ->
+          HttpResponse.response("text/plain", new String(request.body(), StandardCharsets.UTF_8)));
+      builder.blockingQueryHandler("/ping", request -> HttpResponse.response("text/plain", "pong"));
+    });
+
+    final var exchange = rawExchange(port, "POST /echo HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+        + "Content-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello"
+        + "GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    final var response = exchange.response();
+    final int second = response.indexOf("HTTP/1.1 ", 1);
+    org.junit.jupiter.api.Assertions.assertTrue(second > 0,
+        "the request behind the POST must be answered on the same socket: " + response);
+    final var first = response.substring(0, second);
+    assertEquals(200, rawStatus(first), response);
+    org.junit.jupiter.api.Assertions.assertNull(rawHeader(first, "Connection"), response);
+    assertEquals("hello", rawBody(first), response);
+    final var next = response.substring(second);
+    assertEquals(200, rawStatus(next), response);
+    assertEquals("pong", rawBody(next), response);
+    org.junit.jupiter.api.Assertions.assertTrue(exchange.closed(),
+        "the server must close after Connection: close: " + response);
   }
 
   @Test

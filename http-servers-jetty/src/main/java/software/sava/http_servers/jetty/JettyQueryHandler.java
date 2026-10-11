@@ -6,6 +6,7 @@ import org.eclipse.jetty.server.Handler;
 import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.server.Response;
 import org.eclipse.jetty.util.Callback;
+import software.sava.http_servers.core.response.HttpResponse;
 import software.sava.http_servers.core.response.QueryHandler;
 
 import java.nio.ByteBuffer;
@@ -38,7 +39,9 @@ final class JettyQueryHandler extends Handler.Abstract {
       responseHeaders.put(header.getKey(), header.getValue());
     }
 
-    response.setStatus(httpResponse.statusCode());
+    response.setStatus(HttpResponse.checkFinalStatus(httpResponse.statusCode()));
+    // as in JettyController's catch: body still to come makes the head say Connection: close
+    request.consumeAvailable();
     response.write(true, ByteBuffer.wrap(httpResponse.body()), callback);
     return true;
   }

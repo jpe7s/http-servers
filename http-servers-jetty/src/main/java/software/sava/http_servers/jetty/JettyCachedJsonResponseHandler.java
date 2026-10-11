@@ -23,6 +23,8 @@ final class JettyCachedJsonResponseHandler extends Handler.Abstract {
     responseHeaders.put(JettyController.JSON_CONTENT);
 
     final byte[] cachedJson = cachedResponse.response();
+    // as in JettyController's catch: body still to come makes the head say Connection: close
+    request.consumeAvailable();
     response.write(true, ByteBuffer.wrap(cachedJson), callback);
 
     return true;

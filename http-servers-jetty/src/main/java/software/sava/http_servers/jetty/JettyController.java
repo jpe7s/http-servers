@@ -48,6 +48,8 @@ final class JettyController extends Handler.Sequence {
       final var lookup = handlerMap.lookupHandler(method, path);
       final var handler = lookup.handler();
       if (handler == null) {
+        // as in the catch below: body still to come makes the head say Connection: close
+        request.consumeAvailable();
         final var allowedMethods = lookup.allowedMethods();
         if (lookup.badRequest()) {
           // Jetty's UriCompliance rejects ambiguous targets before this handler runs;
